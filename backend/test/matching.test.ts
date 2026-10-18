@@ -16,55 +16,96 @@ const lost: MatchItem = {
   event_at: "2026-01-01T10:00:00Z",
 };
 const found = { ...lost, type: "FOUND", event_at: "2026-01-01T10:25:00Z" };
-test("matching uses the specified weights and reaches strong-match threshold", () => {
+test("original score weights still rank identical text strongly", () => {
   const s = score(lost, found)!;
-  assert.ok(s.total_score >= 99 && s.total_score <= 100);
+  assert.ok(s.total_score >= 99);
   assert.equal(s.visual_score, 40);
   assert.equal(s.location_score, 30);
   assert.equal(s.feature_score, 10);
-  assert.equal(
-    s.total_score,
-    Math.round(
-      (s.visual_score + s.location_score + s.time_score + s.feature_score) *
-        100,
-    ) / 100,
+});
+test("any shared word in name or description is enough, regardless of category or distance", () => {
+  const b = {
+    ...found,
+    item_name: "backpack",
+    description: "",
+    category: "Other",
+    location_id: null,
+    latitude: 52,
+    event_at: "2026-04-01T00:00:00Z",
+    brand: "",
+    color: "",
+    unique_features: [],
+  };
+  const s = score(lost, b);
+  assert.ok(s);
+  assert.ok(s.total_score < 70, "Low rank does not exclude an MVP suggestion");
+  assert.ok(
+    score(
+      { ...lost, item_name: "Tishka", description: "striped cat" },
+      { ...b, item_name: "Kitten", description: "striped fur" },
+    ),
   );
 });
-test("same report types and category mismatches are excluded", () => {
-  assert.equal(score(lost, lost), null);
-  assert.equal(score(lost, { ...found, category: "Keys" }), null);
+test("a single shared color word in user text counts for the permissive MVP", () => {
+  assert.ok(
+    score(
+      { ...lost, item_name: "yellow bag", description: "" },
+      { ...found, item_name: "yellow diamond", description: "" },
+    ),
+  );
 });
-test("location radius is geographic and excludes distant reports", () => {
-  const distant = { ...found, location_id: "another", latitude: 52 };
-  assert.ok(distance(lost, distant) > 100000);
-  assert.equal(score(lost, distant), null);
+test("completely different names and descriptions remain Searching despite shared metadata or photos", () => {
+  const a = {
+    ...lost,
+    item_name: "Tishka",
+    description: "cat",
+    brand: "",
+    color: "yellow",
+    ai_analysis: { image_sha256: "same-photo", object_type: "object" },
+  };
+  const b = {
+    ...found,
+    item_name: "yellow diamond",
+    description: "gemstone",
+    brand: "",
+    color: "yellow",
+    ai_analysis: a.ai_analysis,
+  };
+  assert.equal(score(a, b), null);
 });
-test("unknown coordinates do not become a nearby match", () => {
+test("generic reporting words alone do not connect unrelated objects", () => {
   assert.equal(
     score(
-      { ...lost, latitude: undefined },
-      { ...found, location_id: "other", latitude: undefined },
+      { ...lost, item_name: "Lost cat", description: "my item" },
+      { ...found, item_name: "Found diamond", description: "my item" },
     ),
     null,
   );
 });
-test("old and invalid event times are excluded", () => {
-  assert.equal(
-    score(lost, { ...found, event_at: "2026-02-01T00:00:00Z" }),
-    null,
+test("same types never match and unknown coordinates do not block shared text", () => {
+  assert.equal(score(lost, lost), null);
+  assert.ok(
+    score(
+      { ...lost, location_id: null, latitude: undefined, longitude: undefined },
+      {
+        ...found,
+        location_id: null,
+        latitude: undefined,
+        longitude: undefined,
+      },
+    ),
   );
-  assert.equal(score(lost, { ...found, event_at: "invalid" }), null);
 });
-test("no unique evidence earns zero feature points", () => {
-  assert.equal(
-    score({ ...lost, unique_features: [] }, { ...found, unique_features: [] })
-      ?.feature_score,
-    0,
-  );
-  assert.equal(similarity("", ""), 0);
-});
-test("Unicode matching is case insensitive", () =>
+test("Unicode text remains case insensitive", () =>
   assert.equal(similarity("Синий РЮКЗАК", "синий рюкзак"), 1));
+test("GPS-only schema still requires paired coordinates", () => {
+  const gps = { ...lost, location_id: null };
+  assert.equal(reportSchema.safeParse(gps).success, true);
+  assert.equal(
+    reportSchema.safeParse({ ...gps, longitude: undefined }).success,
+    false,
+  );
+});
 test("schema validates coordinates, paired GPS, dates and required fields", () => {
   const good = { ...lost, event_at: "2026-01-01T10:00:00Z" };
   assert.equal(reportSchema.safeParse(good).success, true);
@@ -97,135 +138,4 @@ test("registration validates email, password and name", () => {
     }).success,
     false,
   );
-});
-test("unrelated objects in Other cannot match from place/time/features alone", () => {
-  const cat = {
-    ...lost,
-    category: "Other",
-    item_name: "Tishka",
-    brand: "",
-    color: "yellow",
-    description: "",
-    unique_features: ["small scratch"],
-  };
-  const diamond = {
-    ...found,
-    category: "Other",
-    item_name: "yellow diamond",
-    brand: "",
-    color: "yellow",
-    description: "",
-    unique_features: ["small scratch"],
-  };
-  assert.equal(score(cat, diamond), null);
-  assert.equal(
-    score({ ...cat, item_name: "yellow bag" }, diamond),
-    null,
-    "A shared color is not object identity",
-  );
-});
-test("a common venue never overrides far-apart GPS positions", () => {
-  assert.equal(score(lost, { ...found, latitude: 52 }), null);
-});
-test("GPS-only reports match nearby, never globally through null place IDs", () => {
-  assert.ok(
-    score({ ...lost, location_id: null }, { ...found, location_id: null })!
-      .total_score >= 90,
-  );
-  assert.equal(
-    score(
-      { ...lost, location_id: null, latitude: undefined, longitude: undefined },
-      {
-        ...found,
-        location_id: null,
-        latitude: undefined,
-        longitude: undefined,
-      },
-    ),
-    null,
-  );
-});
-test("a GPS report does not require a registered location, but needs complete coordinates", () => {
-  const gps = { ...lost, location_id: null, location_label: "Near the park" };
-  assert.equal(reportSchema.safeParse(gps).success, true);
-  assert.equal(
-    reportSchema.safeParse({
-      ...gps,
-      latitude: undefined,
-      longitude: undefined,
-    }).success,
-    false,
-  );
-  assert.equal(
-    reportSchema.safeParse({ ...gps, longitude: undefined }).success,
-    false,
-  );
-});
-
-test("a stone without a brand still matches despite inconsistent AI labels", () => {
-  const a = {
-    ...lost,
-    category: "Other",
-    brand: "",
-    color: "yellow",
-    item_name: "yellow diamond",
-    description: "yellow stone",
-    unique_features: [],
-    ai_analysis: { object_type: "diamond" },
-  };
-  const b = {
-    ...a,
-    type: "FOUND",
-    item_name: "yellow stone",
-    ai_analysis: { object_type: "gemstone" },
-  };
-  assert.ok(score(a, b)!.total_score >= 70);
-});
-test("identical stored image pixels provide evidence without relying on AI names", () => {
-  const a = {
-    ...lost,
-    category: "Other",
-    brand: "",
-    color: "",
-    item_name: "diamond",
-    description: "",
-    unique_features: [],
-    ai_analysis: {
-      image_sha256: "server-generated-digest",
-      object_type: "diamond",
-    },
-  };
-  const b = {
-    ...a,
-    type: "FOUND",
-    item_name: "stone",
-    ai_analysis: {
-      image_sha256: "server-generated-digest",
-      object_type: "gemstone",
-    },
-  };
-  assert.equal(score(a, b)?.visual_score, 40);
-  assert.ok(score(a, b)!.total_score >= 89);
-  assert.equal(score(a, { ...b, latitude: 52 }), null);
-  assert.equal(
-    score(a, { ...b, ai_analysis: { image_sha256: "different-image" } }),
-    null,
-  );
-});
-
-test("same photo remains eligible at the edge of the allowed radius and date window", () => {
-  const a = {
-    ...lost,
-    brand: "",
-    unique_features: [],
-    ai_analysis: { image_sha256: "same-photo" },
-  };
-  const b = {
-    ...a,
-    type: "FOUND",
-    latitude: a.latitude! + 0.00448,
-    event_at: "2026-01-08T10:00:00Z",
-  };
-  assert.ok(distance(a, b) < 500);
-  assert.ok(score(a, b)!.total_score >= 70);
 });

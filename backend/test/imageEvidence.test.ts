@@ -37,5 +37,16 @@ test("Gemini errors expose actionable categories without provider payloads or se
   assert.match(geminiFailure({ status: 429, message: "secret" }), /quota/);
   assert.match(geminiFailure({ status: 403, message: "secret" }), /key/);
   assert.match(geminiFailure({ status: 404 }), /model/);
+  assert.match(
+    geminiFailure({
+      status: 400,
+      message: "User location is not supported for the API use",
+    }),
+    /region/,
+  );
+  assert.match(
+    geminiFailure({ status: 400, message: "API key not valid. secret" }),
+    /key is invalid/,
+  );
   assert.doesNotMatch(geminiFailure({ message: "secret" }), /secret/);
 });

@@ -426,6 +426,8 @@ function FoundItem({ report, close }: { report: Report; close: () => void }) {
   );
 }
 function MatchingDiagnostics({ id }: { id: string }) {
+  const [checking, setChecking] = useState(false),
+    [checkResult, setCheckResult] = useState("");
   const d = useQuery<any>({
     queryKey: ["diagnostics", id],
     queryFn: () => api(`/reports/${id}/diagnostics`),
@@ -450,12 +452,32 @@ function MatchingDiagnostics({ id }: { id: string }) {
             Search job: {d.data.job?.state || "not queued"}
           </Text>
           <Text style={s.muted}>
-            Photo comparison:{" "}
-            {d.data.has_image_evidence ? "prepared" : "not prepared / no photo"}
+            MVP matching uses shared words in names or descriptions. Gemini,
+            distance and category do not block suggestions.
           </Text>
-          {d.data.job?.last_error && (
-            <Text style={s.notice}>{d.data.job.last_error}</Text>
+          {(d.data.ai_error || d.data.job?.last_error) && (
+            <Text style={s.notice}>
+              {d.data.ai_error || d.data.job.last_error}
+            </Text>
           )}
+          <Button
+            secondary
+            title={checking ? "Checking Gemini…" : "Check Gemini API"}
+            disabled={checking}
+            onPress={async () => {
+              setChecking(true);
+              setCheckResult("");
+              try {
+                const out = await api("/ai/check", { method: "POST" });
+                setCheckResult(`${out.message} Model: ${out.model}`);
+              } catch (e) {
+                setCheckResult((e as Error).message);
+              } finally {
+                setChecking(false);
+              }
+            }}
+          />
+          {checkResult ? <Text style={s.notice}>{checkResult}</Text> : null}
           {d.data.candidates.map((c: any) => (
             <View key={c.report.id} style={{ marginTop: 12 }}>
               <Text style={s.h3}>{c.report.item_name}</Text>
@@ -618,7 +640,7 @@ function MobileReportTools({ report: r }: { report: Report }) {
               await api(`/reports/${r.id}/recheck`, { method: "POST" });
               Alert.alert(
                 "Search queued",
-                "Check Matches shortly. Reports must be in the same category, within 500 m (or the same selected venue), and no more than 7 days apart.",
+                "Check Matches shortly. Any shared word in the names or descriptions creates an unverified suggestion from another account.",
               );
               refresh();
             } catch (e) {

@@ -228,8 +228,8 @@ async function main() {
       "GPS-only report must qualify by actual proximity",
     );
     assert.ok(
-      !candidates.data.some((r: any) => r.id === farSamePlace.id),
-      "A shared venue cannot override distant GPS",
+      candidates.data.some((r: any) => r.id === farSamePlace.id),
+      "MVP search must not exclude matching text because of GPS distance",
     );
     assert.ok(
       !candidates.data.some((r: any) => r.id === sameOwnerLost.id),
@@ -305,11 +305,17 @@ async function main() {
       "GET",
       403,
     );
+    await call("/ai/check", undefined, {}, "POST", 401);
     const diagnostics = await call(
       `/reports/${lost.id}/diagnostics`,
       owner.token,
     );
     assert.equal(typeof diagnostics.gemini_configured, "boolean");
+    if (!diagnostics.gemini_configured) {
+      const check = await call("/ai/check", owner.token, {}, "POST", 201);
+      assert.equal(check.ok, false);
+      assert.match(check.message, /GEMINI_API_KEY/);
+    }
     const candidate = diagnostics.candidates.find(
       (c: any) => c.report.id === found.id,
     );
@@ -592,12 +598,14 @@ async function main() {
       .eq("entity_id", m.id);
     assert.ok(audit.data?.some((a) => a.action === "ITEM_RETURNED"));
     // Regression: different names + recompressed same photo, no brand/features,
-    // about 490m apart. Evidence must survive upload conversion and worker reads.
+    // more than 500m apart. A shared word must suffice even without Gemini.
     const stoneInput = {
       ...input,
       latitude: location.latitude,
       longitude: location.longitude,
       category: "Jewelry",
+      location_id: null,
+      location_label: "GPS area",
       item_name: "yellow diamond",
       brand: "",
       color: "yellow",
@@ -620,7 +628,8 @@ async function main() {
         ...stoneInput,
         type: "FOUND",
         item_name: "yellow stone",
-        latitude: location.latitude + 0.0044,
+        category: "Other",
+        latitude: location.latitude + 0.044,
         event_at: new Date().toISOString(),
         verification_question: "What is engraved underneath?",
         verification_answer: "Test initials AB",
@@ -669,17 +678,23 @@ async function main() {
     }
     assert.ok(
       stoneMatch,
-      "Recompressed duplicate photo must create an automatic match at ~490m",
+      "Recompressed duplicate photo must create an automatic match beyond 500m",
     );
     assert.equal(stoneMatch.source, "AUTOMATIC");
-    assert.ok(stoneMatch.total_score >= 70);
+    assert.ok(
+      stoneMatch.total_score > 0 && stoneMatch.total_score < 70,
+      "Low score must not discard shared text",
+    );
     const stoneDetails = await call(
       `/reports/${stoneLost.id}/diagnostics`,
       owner.token,
     );
-    assert.equal(stoneDetails.has_image_evidence, true);
-    if (!stoneDetails.gemini_configured)
-      assert.match(stoneDetails.job.last_error, /GEMINI_API_KEY/);
+    assert.equal(
+      stoneDetails.candidates.find((c: any) => c.report.id === stoneFound.id)
+        ?.reasons.length,
+      0,
+    );
+    // Publication must not wait for Gemini: the job may still be queued here.
     console.log(
       "PASS: persistence, validated private uploads, automatic matching, notifications, RLS, authorization, ownership lockout, secure chat, audited staff return.",
     );

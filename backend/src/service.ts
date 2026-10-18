@@ -121,7 +121,7 @@ export class Service {
       if (m.status !== "PROPOSED") continue;
       if (m.source === "MANUAL") continue;
       const fresh = score(m.lost, m.found);
-      if (!fresh || fresh.total_score < 70) {
+      if (!fresh) {
         result(await this.db.rpc("invalidate_match", { mid: m.id }));
       } else
         result(
@@ -270,6 +270,58 @@ export class Service {
         .eq("id", r.id),
     );
   }
+  async checkGemini() {
+    if (!this.config.GEMINI_API_KEY)
+      return {
+        ok: false,
+        message: "Set GEMINI_API_KEY in backend/.env and restart the API.",
+        model: this.config.GEMINI_MODEL,
+      };
+    try {
+      const response = await new GoogleGenAI({
+        apiKey: this.config.GEMINI_API_KEY,
+      }).models.generateContent({
+        model: this.config.GEMINI_MODEL,
+        contents: "Reply with OK.",
+        config: { httpOptions: { timeout: 10000 } },
+      });
+      return {
+        ok: Boolean(response.text),
+        message: response.text
+          ? "Gemini API responded successfully."
+          : "Gemini returned no text.",
+        model: this.config.GEMINI_MODEL,
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        message: geminiFailure(e),
+        model: this.config.GEMINI_MODEL,
+      };
+    }
+  }
+  async matchReport(r: any) {
+    const candidates = result(
+      await this.db.rpc("nearby_candidates", { rid: r.id }),
+    );
+    for (const c of candidates) {
+      const s = score(r, c);
+      if (!s) continue;
+      const lost = r.type === "LOST" ? r : c,
+        found = r.type === "FOUND" ? r : c;
+      result(
+        await this.db.rpc("record_match", {
+          lid: lost.id,
+          fid: found.id,
+          visual: s.visual_score,
+          loc: s.location_score,
+          tm: s.time_score,
+          feature: s.feature_score,
+          total: s.total_score,
+        }),
+      );
+    }
+  }
   async work() {
     const jobs = result(await this.db.rpc("claim_job"));
     if (!jobs.length) return;
@@ -288,7 +340,8 @@ export class Service {
         );
         return;
       }
-      await this.imageEvidence(r);
+      // Publish text suggestions before any Storage or Gemini request can fail or block.
+      await this.matchReport(r);
       let aiError: string | null = null;
       const images = result(
         await this.db
@@ -299,6 +352,7 @@ export class Service {
       );
       if (images.length && this.config.GEMINI_API_KEY) {
         try {
+          await this.imageEvidence(r);
           const file = result(
             await this.db.storage
               .from("item-images")
@@ -323,6 +377,24 @@ export class Service {
             ],
             config: {
               responseMimeType: "application/json",
+              responseJsonSchema: {
+                type: "object",
+                required: [
+                  "category",
+                  "object_type",
+                  "description",
+                  "features",
+                ],
+                properties: {
+                  category: { type: "string" },
+                  object_type: { type: "string" },
+                  description: { type: "string" },
+                  brand: { type: ["string", "null"] },
+                  color: { type: ["string", "null"] },
+                  features: { type: "array", items: { type: "string" } },
+                  logos: { type: "array", items: { type: "string" } },
+                },
+              },
               httpOptions: { timeout: 30000 },
             },
           });
@@ -330,8 +402,8 @@ export class Service {
             .object({
               category: z.string().max(100),
               object_type: z.string().max(100),
-              brand: z.string().max(100).nullable(),
-              color: z.string().max(100).nullable(),
+              brand: z.string().max(100).nullable().default(null),
+              color: z.string().max(100).nullable().default(null),
               logos: z.array(z.string().max(200)).max(20).default([]),
               description: z.string().max(2000),
               features: z.array(z.string().max(200)).max(20),
@@ -356,13 +428,22 @@ export class Service {
           );
         } catch (e) {
           aiError = geminiFailure(e);
+          result(
+            await this.db
+              .from("jobs")
+              .update({ last_error: aiError })
+              .eq("id", job.id),
+          );
           log.warn(
             { report: r.id, reason: aiError },
             "AI analysis failed; structured matching continues",
           );
           await this.db
             .from("reports")
-            .update({ ai_state: "FAILED" })
+            .update({
+              ai_state: "FAILED",
+              ai_analysis: { ...(r.ai_analysis || {}), error: aiError },
+            })
             .eq("id", r.id);
         }
       } else if (images.length) {
@@ -370,29 +451,11 @@ export class Service {
           "Gemini is not configured: set GEMINI_API_KEY in backend/.env and restart the API.";
         await this.db
           .from("reports")
-          .update({ ai_state: "FAILED" })
+          .update({
+            ai_state: "FAILED",
+            ai_analysis: { ...(r.ai_analysis || {}), error: aiError },
+          })
           .eq("id", r.id);
-      }
-      const candidates = result(
-        await this.db.rpc("nearby_candidates", { rid: r.id }),
-      );
-      for (const c of candidates) {
-        await this.imageEvidence(c);
-        const s = score(r, c);
-        if (!s || s.total_score < 70) continue;
-        const lost = r.type === "LOST" ? r : c,
-          found = r.type === "FOUND" ? r : c;
-        result(
-          await this.db.rpc("record_match", {
-            lid: lost.id,
-            fid: found.id,
-            visual: s.visual_score,
-            loc: s.location_score,
-            tm: s.time_score,
-            feature: s.feature_score,
-            total: s.total_score,
-          }),
-        );
       }
       result(
         await this.db
@@ -535,6 +598,18 @@ export class Service {
 
 export function geminiFailure(error: unknown): string {
   const status = Number((error as any)?.status || (error as any)?.code);
+  // Inspect known provider messages, but never return raw errors (may include keys).
+  const message = String((error as any)?.message || "").toLowerCase();
+  if (
+    message.includes("location is not supported") ||
+    message.includes("region is not supported")
+  )
+    return "Gemini is unavailable in this server's region. Check Gemini API regional availability.";
+  if (
+    message.includes("api key not valid") ||
+    message.includes("api_key_invalid")
+  )
+    return "Gemini API key is invalid. Replace GEMINI_API_KEY in backend/.env and restart the API.";
   if (status === 400 || status === 401 || status === 403)
     return (
       "Gemini rejected the request: check the server API key, API access and region (HTTP " +

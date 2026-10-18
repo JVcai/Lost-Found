@@ -16,7 +16,7 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import { z } from "zod";
 import { reportSchema, registerSchema } from "@lostnet/shared";
 import { score, matchReasons } from "./matching";
-import { Service, fail, result } from "./service";
+import { Service, fail, result, log } from "./service";
 const uuid = (id: string) => z.uuid().parse(id);
 const login = z.object({
   email: z.email(),
@@ -39,6 +39,10 @@ export class Api {
       database: "ok",
       ai: this.s.config.GEMINI_API_KEY ? "configured" : "unconfigured",
     };
+  }
+  @Post("ai/check") async checkGemini(@Headers("authorization") h: string) {
+    await this.s.actor(h);
+    return this.s.checkGemini();
   }
   @Post("auth/register") async register(@Body() body: unknown) {
     const v = registerSchema.parse(body);
@@ -152,6 +156,14 @@ export class Api {
     uuid(id);
     await this.s.report(id, actor, true);
     result(await this.s.db.rpc("publish_report", { rid: id, actor }));
+    try {
+      await this.s.matchReport(await this.s.report(id, actor, true));
+    } catch {
+      log.warn(
+        { report: id },
+        "Immediate text matching failed; queued worker will retry",
+      );
+    }
     return { ok: true };
   }
   @Get("reports/my") async my(@Headers("authorization") h: string) {
@@ -282,7 +294,7 @@ export class Api {
     const pairs = result(
       await this.s.db
         .from("matches")
-        .select("lost_report_id,found_report_id,status")
+        .select("lost_report_id,found_report_id,status,rejection_reason")
         .or(`lost_report_id.eq.${id},found_report_id.eq.${id}`),
     );
     // Do not expose private LOST reports or counterpart coordinates/AI/description.
@@ -294,7 +306,9 @@ export class Api {
               const reasons = matchReasons(r, c);
               if (pair?.status === "REJECTED")
                 reasons.unshift(
-                  "This pair was rejected. Explicit rejections are not reopened automatically.",
+                  pair.rejection_reason === "ALGORITHM"
+                    ? "Withdrawn by the previous algorithm. Recheck matches will reconsider this pair."
+                    : "Rejected by a user. Not reopened automatically.",
                 );
               return {
                 report: await this.s.safeReport(c),
@@ -307,6 +321,7 @@ export class Api {
         : [];
     return {
       ai_state: r.ai_state,
+      ai_error: r.ai_analysis?.error || null,
       gemini_configured: Boolean(this.s.config.GEMINI_API_KEY),
       has_image_evidence: Boolean(r.ai_analysis?.image_sha256),
       job,
@@ -321,6 +336,7 @@ export class Api {
     const r = await this.s.report(uuid(id), actor, true);
     if (!["ACTIVE", "FOUND", "STORED", "MATCH_FOUND"].includes(r.status))
       fail("This report is not available for matching");
+    await this.s.matchReport(r);
     const job = result(
       await this.s.db
         .from("jobs")
