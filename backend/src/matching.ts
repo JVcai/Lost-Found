@@ -8,7 +8,7 @@ export interface MatchItem {
   unique_features: string[];
   ai_features?: string[];
   location_id: string | null;
-  ai_analysis?: { object_type?: string } | null;
+  ai_analysis?: { object_type?: string; image_sha256?: string } | null;
   latitude?: number;
   longitude?: number;
   event_at: string;
@@ -96,6 +96,10 @@ export function score(a: MatchItem, b: MatchItem) {
     meaningful(a.item_name + " " + a.description),
     meaningful(b.item_name + " " + b.description),
   );
+  const sameImage = Boolean(
+    a.ai_analysis?.image_sha256 &&
+    a.ai_analysis.image_sha256 === b.ai_analysis?.image_sha256,
+  );
   const objectA = a.ai_analysis?.object_type || "",
     objectB = b.ai_analysis?.object_type || "";
   const visualObject = Boolean(
@@ -109,21 +113,27 @@ export function score(a: MatchItem, b: MatchItem) {
       a.brand.trim().toLowerCase() === b.brand.trim().toLowerCase() &&
       a.color.trim().toLowerCase() === b.color.trim().toLowerCase(),
     );
-  if (names < 0.2 && text < 0.2 && !visualObject && !brandColor) return null;
-  if (objectA && objectB && similarity(objectA, objectB) === 0 && names < 0.5)
+  if (names < 0.2 && text < 0.2 && !visualObject && !brandColor && !sameImage)
     return null;
+  // AI object labels are descriptive text, not a reliable exclusion rule.
   const equal = (x: string, y: string) =>
     x.trim() && y.trim() && x.toLowerCase() === y.toLowerCase() ? 1 : 0;
-  const visual =
-    40 *
-    (0.3 +
-      0.25 * equal(a.color, b.color) +
-      0.2 * equal(a.brand, b.brand) +
-      0.25 *
-        similarity(
-          [a.item_name, a.description, ...(a.ai_features || [])].join(" "),
-          [b.item_name, b.description, ...(b.ai_features || [])].join(" "),
-        ));
+  // Missing brand/color is unknown, rather than evidence of a mismatch.
+  const textEvidence = Math.max(
+    names,
+    text,
+    visualObject ? similarity(objectA, objectB) : 0,
+  );
+  const colorWeight = a.color.trim() && b.color.trim() ? 0.25 : 0;
+  const brandWeight = a.brand.trim() && b.brand.trim() ? 0.2 : 0;
+  const visual = sameImage
+    ? 40
+    : (40 *
+        (0.3 * textEvidence +
+          colorWeight * equal(a.color, b.color) +
+          brandWeight * equal(a.brand, b.brand) +
+          0.25 * textEvidence)) /
+      (0.55 + colorWeight + brandWeight);
   const location =
     30 *
     (Number.isFinite(meters)

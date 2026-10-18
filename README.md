@@ -24,7 +24,7 @@ copy mobile\.env.example mobile\.env
 
 Существующие `.env` не перезаписывайте. Заполните `backend/.env` URL, anon key, server-only service-role key и Gemini key. В `mobile/.env` нужны только публичный URL Supabase, anon key и адрес API. Секреты Gemini/service-role не должны иметь префикс `EXPO_PUBLIC_` и не должны попадать в мобильный код или Git.
 
-В новом Supabase выполните `database/migrations/001_initial.sql`, затем `database/migrations/002_gps_and_match_reconciliation.sql` и `database/seed.sql`. В существующем проекте выполните только новую миграцию `002_gps_and_match_reconciliation.sql`, не повторяйте 001 и не удаляйте данные. Включите Email Auth. Подтверждение почты требует SMTP; для изолированного теста его можно временно отключить. Полноценный native-сценарий восстановления пароля по deep link пока не реализован — см. STATUS.md.
+В новом Supabase выполните `database/migrations/001_initial.sql`, затем `database/migrations/002_gps_and_match_reconciliation.sql` , затем `database/migrations/003_matching_evidence.sql` и `database/seed.sql`. В существующем проекте выполните миграции 002 (если ещё не применена) и `003_matching_evidence.sql`, не повторяйте 001 и не удаляйте данные. Включите Email Auth. Подтверждение почты требует SMTP; для изолированного теста его можно временно отключить. Полноценный native-сценарий восстановления пароля по deep link пока не реализован — см. STATUS.md.
 
 Терминал 1:
 
@@ -86,3 +86,5 @@ npm run export:native -w mobile
 Последняя команда проверяет JS/assets bundles Android/iOS; она не создаёт подписанные APK/IPA. Для приёмочного теста с отдельными пользователями см. [TESTING.md](docs/TESTING.md). Это тест только для disposable-проекта.
 
 [Локальный стенд без облачных ключей](docs/LOCAL.md) · [API](docs/API.md) · [Развёртывание](docs/DEPLOYMENT.md) · [Ограничения](docs/STATUS.md)
+
+Повторный поиск: после обновления сервера и миграции 003 нажмите **Reports → Recheck matches** у опубликованного объявления. Поиск выполняется в фоне. Фото сравниваются по SHA-256 нормализованных пикселей: совпадение учитывается только для одинаковых изображений, изменённые или повторно сжатые фото могут не совпасть. Это не распознавание похожих фотографий. Разные названия Gemini больше не отменяют текстовое совпадение; отсутствие марки не снижает оценку. Категория, радиус 500 м / выбранное место, срок 7 дней и разные авторы остаются обязательными. Отклонённые пользователем пары не восстанавливаются.

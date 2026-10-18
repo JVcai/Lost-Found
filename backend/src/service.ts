@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Injectable, HttpException } from "@nestjs/common";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { GoogleGenAI } from "@google/genai";
@@ -232,6 +233,39 @@ export class Service {
       throw e;
     }
   }
+  async imageEvidence(r: any) {
+    if (r.ai_analysis?.image_sha256) return;
+    const images = result(
+      await this.db
+        .from("report_images")
+        .select("storage_path")
+        .eq("report_id", r.id)
+        .order("created_at")
+        .limit(1),
+    );
+    if (!images.length) return;
+    const file = result(
+      await this.db.storage
+        .from("item-images")
+        .download(images[0].storage_path),
+    );
+    const pixels = await sharp(Buffer.from(await file.arrayBuffer()))
+      .rotate()
+      .resize(256, 256, { fit: "inside" })
+      .removeAlpha()
+      .raw()
+      .toBuffer();
+    r.ai_analysis = {
+      ...(r.ai_analysis || {}),
+      image_sha256: createHash("sha256").update(pixels).digest("hex"),
+    };
+    result(
+      await this.db
+        .from("reports")
+        .update({ ai_analysis: r.ai_analysis })
+        .eq("id", r.id),
+    );
+  }
   async work() {
     const jobs = result(await this.db.rpc("claim_job"));
     if (!jobs.length) return;
@@ -250,6 +284,7 @@ export class Service {
         );
         return;
       }
+      await this.imageEvidence(r);
       let aiError = false;
       const images = result(
         await this.db
@@ -298,12 +333,16 @@ export class Service {
               features: z.array(z.string().max(200)).max(20),
             })
             .parse(JSON.parse(response.text || ""));
+          r.ai_analysis = {
+            ...analysis,
+            image_sha256: r.ai_analysis?.image_sha256,
+          };
           r.ai_features = analysis.features;
           result(
             await this.db
               .from("reports")
               .update({
-                ai_analysis: analysis,
+                ai_analysis: r.ai_analysis,
                 ai_description: analysis.description,
                 ai_features: analysis.features,
                 ai_state: "DONE",
@@ -332,6 +371,7 @@ export class Service {
         await this.db.rpc("nearby_candidates", { rid: r.id }),
       );
       for (const c of candidates) {
+        await this.imageEvidence(c);
         const s = score(r, c);
         if (!s || s.total_score < 70) continue;
         const lost = r.type === "LOST" ? r : c,

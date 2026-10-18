@@ -161,3 +161,54 @@ test("a GPS report does not require a registered location, but needs complete co
     false,
   );
 });
+
+test("a stone without a brand still matches despite inconsistent AI labels", () => {
+  const a = {
+    ...lost,
+    category: "Other",
+    brand: "",
+    color: "yellow",
+    item_name: "yellow diamond",
+    description: "yellow stone",
+    unique_features: [],
+    ai_analysis: { object_type: "diamond" },
+  };
+  const b = {
+    ...a,
+    type: "FOUND",
+    item_name: "yellow stone",
+    ai_analysis: { object_type: "gemstone" },
+  };
+  assert.ok(score(a, b)!.total_score >= 70);
+});
+test("identical stored image pixels provide evidence without relying on AI names", () => {
+  const a = {
+    ...lost,
+    category: "Other",
+    brand: "",
+    color: "",
+    item_name: "diamond",
+    description: "",
+    unique_features: [],
+    ai_analysis: {
+      image_sha256: "server-generated-digest",
+      object_type: "diamond",
+    },
+  };
+  const b = {
+    ...a,
+    type: "FOUND",
+    item_name: "stone",
+    ai_analysis: {
+      image_sha256: "server-generated-digest",
+      object_type: "gemstone",
+    },
+  };
+  assert.equal(score(a, b)?.visual_score, 40);
+  assert.ok(score(a, b)!.total_score >= 89);
+  assert.equal(score(a, { ...b, latitude: 52 }), null);
+  assert.equal(
+    score(a, { ...b, ai_analysis: { image_sha256: "different-image" } }),
+    null,
+  );
+});

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
+  Alert,
   View,
   Text,
   TextInput,
@@ -456,6 +457,29 @@ function MobileReportTools({ report: r }: { report: Report }) {
           secondary
           title={r.status === "DRAFT" ? "Edit draft" : "Review AI description"}
           onPress={() => setEdit(true)}
+        />
+      )}
+      {["ACTIVE", "FOUND", "STORED", "MATCH_FOUND"].includes(r.status) && (
+        <Button
+          secondary
+          title="Recheck matches"
+          disabled={busy}
+          onPress={async () => {
+            setBusy(true);
+            setError("");
+            try {
+              await api(`/reports/${r.id}/recheck`, { method: "POST" });
+              Alert.alert(
+                "Search queued",
+                "Check Matches shortly. Reports must be in the same category, within 500 m (or the same selected venue), and no more than 7 days apart.",
+              );
+              refresh();
+            } catch (e) {
+              setError((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
         />
       )}
       {edit && (

@@ -234,6 +234,33 @@ export class Api {
     result(await this.s.db.rpc("close_report", { rid: id, actor }));
     return { ok: true };
   }
+  @Post("reports/:id/recheck") async recheck(
+    @Headers("authorization") h: string,
+    @Param("id") id: string,
+  ) {
+    const actor = await this.s.actor(h);
+    const r = await this.s.report(uuid(id), actor, true);
+    if (!["ACTIVE", "FOUND", "STORED", "MATCH_FOUND"].includes(r.status))
+      fail("This report is not available for matching");
+    const job = result(
+      await this.s.db
+        .from("jobs")
+        .select("state")
+        .eq("report_id", id)
+        .maybeSingle(),
+    );
+    if (job?.state === "RUNNING" || job?.state === "PENDING")
+      return { queued: true };
+    result(
+      await this.s.db
+        .from("jobs")
+        .upsert(
+          { report_id: id, state: "PENDING", attempts: 0, last_error: null },
+          { onConflict: "report_id" },
+        ),
+    );
+    return { queued: true };
+  }
   @Post("reports/:id/images")
   @UseInterceptors(
     FileInterceptor("image", { limits: { fileSize: 10485760, files: 1 } }),
@@ -303,7 +330,7 @@ export class Api {
     result(
       await this.s.db
         .from("matches")
-        .update({ status: "REJECTED" })
+        .update({ status: "REJECTED", rejection_reason: "USER" })
         .eq("id", id)
         .eq("status", "PROPOSED"),
     );

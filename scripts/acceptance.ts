@@ -215,6 +215,8 @@ async function main() {
       201,
     );
     await call(`/reports/${found.id}/publish`, finder.token, {}, "POST", 201);
+    await call(`/reports/${found.id}/recheck`, outsider.token, {}, "POST", 403);
+    await call(`/reports/${found.id}/recheck`, finder.token, {}, "POST", 201);
     const candidates = await db.rpc("nearby_candidates", { rid: found.id });
     if (candidates.error) throw candidates.error;
     assert.ok(
@@ -295,6 +297,76 @@ async function main() {
       ).data?.status,
       "REJECTED",
     );
+
+    const recorded = await db
+      .from("matches")
+      .select("*")
+      .eq("lost_report_id", lost.id)
+      .eq("found_report_id", found.id)
+      .maybeSingle();
+    if (recorded.error) throw recorded.error;
+    const args = {
+      lid: lost.id,
+      fid: found.id,
+      visual: 40,
+      loc: 30,
+      tm: 20,
+      feature: 10,
+      total: 100,
+    };
+    if (!recorded.data) {
+      const x = await db.rpc("record_match", args);
+      if (x.error) throw x.error;
+    }
+    const withdrawn = await db.rpc("invalidate_match", {
+      mid: (
+        recorded.data ||
+        (
+          await db
+            .from("matches")
+            .select("id")
+            .eq("lost_report_id", lost.id)
+            .eq("found_report_id", found.id)
+            .single()
+        ).data
+      ).id,
+    });
+    if (withdrawn.error) throw withdrawn.error;
+    const revive = await db.rpc("record_match", args);
+    if (revive.error) throw revive.error;
+    const revived = await db
+      .from("matches")
+      .select("id,status")
+      .eq("lost_report_id", lost.id)
+      .eq("found_report_id", found.id)
+      .single();
+    assert.equal(
+      revived.data?.status,
+      "PROPOSED",
+      "Algorithm withdrawals can be reconsidered",
+    );
+    await db
+      .from("matches")
+      .update({ status: "REJECTED", rejection_reason: "USER" })
+      .eq("id", revived.data!.id);
+    const noRevive = await db.rpc("record_match", args);
+    if (noRevive.error) throw noRevive.error;
+    assert.equal(
+      (
+        await db
+          .from("matches")
+          .select("status")
+          .eq("id", revived.data!.id)
+          .single()
+      ).data?.status,
+      "REJECTED",
+      "Explicit user rejection is final",
+    );
+    // Restore the fixture directly so the existing ownership/return checks can continue.
+    await db
+      .from("matches")
+      .update({ status: "PROPOSED", rejection_reason: null })
+      .eq("id", revived.data!.id);
 
     await call(`/reports/${lost.id}`, outsider.token, undefined, "GET", 403);
     const publicReports = await call("/reports/search", outsider.token);
