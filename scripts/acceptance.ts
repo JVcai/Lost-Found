@@ -627,7 +627,7 @@ async function main() {
       {
         ...stoneInput,
         type: "FOUND",
-        item_name: "yellow diamond",
+        item_name: "yellow dimond",
         category: "Other",
         latitude: location.latitude + 0.044,
         event_at: new Date().toISOString(),

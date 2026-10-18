@@ -18,12 +18,129 @@ export interface MatchItem {
   event_at: string;
 }
 const words = (s: string) =>
-  new Set(s.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+  new Set(
+    s
+      .replace(/([a-zа-я])([A-ZА-Я])/g, "$1 $2")
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/ё/g, "е")
+      .match(/[\p{L}\p{N}]+/gu) || [],
+  );
+const aliases: Record<string, string> = {
+  diamond: "gemstone",
+  diamonds: "gemstone",
+  gem: "gemstone",
+  gemstone: "gemstone",
+  stone: "gemstone",
+  stones: "gemstone",
+  алмаз: "gemstone",
+  алмаза: "gemstone",
+  бриллиант: "gemstone",
+  бриллианта: "gemstone",
+  камень: "gemstone",
+  камня: "gemstone",
+  камнем: "gemstone",
+  камню: "gemstone",
+  cat: "cat",
+  cats: "cat",
+  кот: "cat",
+  кота: "cat",
+  кошка: "cat",
+  кошки: "cat",
+};
+// Bounded edit distance handles small typos, not arbitrary common prefixes.
+function wordSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  const length = Math.max(a.length, b.length),
+    limit = Math.min(2, Math.floor(length * 0.2));
+  if (
+    Math.min(a.length, b.length) < 4 ||
+    length > 40 ||
+    Math.abs(a.length - b.length) > limit ||
+    !limit
+  )
+    return 0;
+  if (a.length === b.length) {
+    const mismatch = [...a]
+      .map((c, i) => (c !== b[i] ? i : -1))
+      .filter((i) => i >= 0);
+    if (
+      mismatch.length === 2 &&
+      mismatch[1] === mismatch[0] + 1 &&
+      a[mismatch[0]] === b[mismatch[1]] &&
+      a[mismatch[1]] === b[mismatch[0]]
+    )
+      return 1 - 1 / length;
+  }
+  let row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++)
+      next[j] = Math.min(
+        next[j - 1] + 1,
+        row[j] + 1,
+        row[j - 1] + Number(a[i - 1] !== b[j - 1]),
+      );
+    if (Math.min(...next) > limit) return 0;
+    row = next;
+  }
+  return row[b.length] <= limit ? 1 - row[b.length] / length : 0;
+}
+const canonicalCache = new Map<string, string>();
+function canonical(word: string): string {
+  const cached = canonicalCache.get(word);
+  if (cached) return cached;
+  if (aliases[word]) return aliases[word];
+  // A typo in "diamond" must still compare with the canonical gemstone label.
+  const possible = new Set(
+    Object.entries(aliases)
+      .filter(
+        ([key]) =>
+          Math.min(word.length, key.length) >= 6 &&
+          wordSimilarity(word, key) >= 0.8,
+      )
+      .map(([, value]) => value),
+  );
+  const value = possible.size === 1 ? [...possible][0] : word;
+  if (canonicalCache.size >= 4096) canonicalCache.clear();
+  canonicalCache.set(word, value);
+  return value;
+}
 export function similarity(a: string, b: string): number {
-  const x = words(a),
-    y = words(b);
-  if (!x.size || !y.size) return 0;
-  return [...x].filter((v) => y.has(v)).length / new Set([...x, ...y]).size;
+  let x = [...new Set([...words(a)].map(canonical))],
+    y = [...new Set([...words(b)].map(canonical))];
+  if (!x.length || !y.length) return 0;
+  if (x.length > y.length) [x, y] = [y, x];
+  // Each word can be used once. Exact matches first, then typo matches.
+  const used = new Set<number>();
+  let matched = 0;
+  const pending: string[] = [];
+  for (const word of x) {
+    const i = y.findIndex((other, i) => !used.has(i) && other === word);
+    if (i >= 0) {
+      used.add(i);
+      matched++;
+    } else pending.push(word);
+  }
+  for (const word of pending) {
+    let best = 0,
+      index = -1;
+    y.forEach((other, i) => {
+      if (!used.has(i)) {
+        const value = wordSimilarity(word, other);
+        if (value > best) {
+          best = value;
+          index = i;
+        }
+      }
+    });
+    if (index >= 0) {
+      used.add(index);
+      matched += best;
+    }
+  }
+  // Extra details do not dilute a shorter description whose words all match.
+  return matched / x.length;
 }
 export function distance(a: MatchItem, b: MatchItem): number {
   if (
@@ -51,6 +168,7 @@ const filler = new Set(
 );
 const colors: Record<string, string> = {
   gray: "grey",
+  grey: "grey",
   серый: "grey",
   серая: "grey",
   white: "white",
@@ -113,7 +231,7 @@ export function matchReasons(a: MatchItem, b: MatchItem): string[] {
     ];
   if (!qualifies(s))
     return [
-      `Name, color and description similarity is ${s.total_score}%. A suggestion requires strictly more than 75%.`,
+      `Name, color and description similarity is ${s.total_score}%. A suggestion requires strictly more than 75%. Contributions: name ${s.visual_score}, description ${s.location_score}, color ${s.time_score} points.`,
     ];
   return [];
 }

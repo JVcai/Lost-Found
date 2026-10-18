@@ -35,7 +35,7 @@ test("75 exactly is excluded, strictly above 75 is admitted", () => {
   };
   const b = {
     ...found,
-    item_name: "stone",
+    item_name: "stone pendant",
     description: a.description,
     color: "yellow",
   };
@@ -110,6 +110,35 @@ test("generic reporting words and empty fields never add similarity", () => {
     ),
     false,
   );
+});
+test("word order, punctuation and additional details do not erase matching words", () => {
+  assert.equal(
+    similarity("yellow diamond", "Diamond, yellow shiny faceted stone"),
+    1,
+  );
+  const a = {
+    ...lost,
+    item_name: "Yellow diamond",
+    description: "bright yellow gemstone",
+    color: "yellow",
+  };
+  const b = {
+    ...found,
+    item_name: "found yellow stone",
+    description: "yellow gemstone bright and shiny",
+    color: "Yellow",
+  };
+  assert.ok(qualifies(score(a, b)));
+});
+test("small typos and supported Russian/English object names still match", () => {
+  assert.ok(similarity("backpack", "backpak") >= 0.8);
+  assert.equal(similarity("diamond", "dimond"), 1);
+  assert.equal(similarity("diamond", "diamnod"), 1);
+  assert.equal(similarity("diamond", "stove"), 0);
+  assert.equal(similarity("бриллиант", "diamond"), 1);
+  assert.equal(similarity("камня", "stone"), 1);
+  assert.equal(similarity("cat", "car"), 0);
+  assert.equal(similarity("Tishka", "diamond"), 0);
 });
 test("Unicode text remains case insensitive", () =>
   assert.equal(similarity("Синий РЮКЗАК", "синий рюкзак"), 1));
