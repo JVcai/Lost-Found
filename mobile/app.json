@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "LostNet",
+    "slug": "lostnet",
+    "scheme": "lostnet",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": { "supportsTablet": true, "bundleIdentifier": "app.lostnet.mobile" },
+    "android": { "package": "app.lostnet.mobile" },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a photo of a lost or found item.",
+          "cameraPermission": "Photograph a lost or found item."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Use your location to help find nearby items."
+        }
+      ],
+      "expo-secure-store",
+      "expo-notifications"
+    ],
+    "web": { "bundler": "metro" }
+  }
+}
