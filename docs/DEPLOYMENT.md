@@ -50,3 +50,11 @@ npx eas-cli@latest build --platform android --profile apk
 On the first build, let EAS generate an Android keystore if you do not already have one for this app. Preserve the signing credentials for future updates. Follow the build URL printed by the command, wait for success, download the `.apk` on the phone and allow installation from that download source when Android asks.
 
 Public variables are baked into the build; changing them later requires rebuilding the APK. A successful native JS export is not proof that EAS signing/native compilation succeeded. Verify registration, camera/gallery, GPS, text matching, ownership verification and API access on the installed APK. Gemini remains a separate unresolved server/provider issue and is not fixed by packaging the app.
+
+### APK opens but login says Network request failed
+
+Login calls the separate Node API; Expo/EAS does not host that API. Verify the public API URL used in the **preview** environment at build time. On the same phone, open that URL with `/health` appended. Expect JSON with `status: ok`; also check `/ready` for database readiness. If this fails in the browser, investigate server deployment, TLS/DNS and reachability first. A working health response does not verify Supabase Auth connectivity; if login proceeds but session setup fails, check the configured Supabase project as well.
+
+Do not use localhost/127.0.0.1 (the phone itself) or the Expo/Metro tunnel URL as the API address. Release APKs can reject plain HTTP even when the URL opens in a browser, and computer LAN addresses do not work from other networks. Use the actual reachable HTTPS backend URL. EAS public values are embedded when building; updating a local `.env` or dashboard variable does not change an already installed APK. Rebuild with `npx eas-cli@latest build --platform android --profile apk` from mobile after correcting preview variables.
+
+The APK build hook now rejects missing, loopback or non-HTTPS URL settings without printing values/keys. This validates configuration shape only; it does not deploy the server or prove service reachability. The client no longer silently defaults to localhost and explains API connection failures separately from HTTP errors.
