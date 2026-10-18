@@ -288,7 +288,8 @@ function Item({ r, open }: { r: Report; open?: () => void }) {
 }
 function Home() {
   const [type, setType] = useState<"LOST" | "FOUND" | null>(null),
-    [search, setSearch] = useState("");
+    [search, setSearch] = useState(""),
+    [selectedFound, setSelectedFound] = useState<Report | null>(null);
   const reports = useQuery<Report[]>({
     queryKey: ["public", search],
     queryFn: () => api("/reports/search?" + new URLSearchParams({ q: search })),
@@ -332,15 +333,150 @@ function Home() {
       {reports.isLoading ? (
         <ActivityIndicator color="#16a34a" />
       ) : reports.data?.length ? (
-        reports.data.map((r) => <Item key={r.id} r={r} />)
+        reports.data.map((r) => (
+          <Item key={r.id} r={r} open={() => setSelectedFound(r)} />
+        ))
       ) : (
         <Empty
           title="Nothing here just yet"
           text="Found items will appear as your community shares them."
         />
       )}
+      {selectedFound && (
+        <FoundItem
+          report={selectedFound}
+          close={() => setSelectedFound(null)}
+        />
+      )}
       {type && <ReportForm type={type} close={() => setType(null)} />}
     </Page>
+  );
+}
+function FoundItem({ report, close }: { report: Report; close: () => void }) {
+  const [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [matchId, setMatchId] = useState<string | null>(null);
+  const own = useQuery<Report[]>({
+    queryKey: ["reports"],
+    queryFn: () => api("/reports/my"),
+  });
+  const choices =
+    own.data?.filter(
+      (r) => r.type === "LOST" && ["ACTIVE", "MATCH_FOUND"].includes(r.status),
+    ) || [];
+  const isOwn = own.data?.some((r) => r.id === report.id);
+  return (
+    <Modal visible animationType="slide" onRequestClose={close}>
+      <SafeAreaView style={{ flex: 1 }}>
+        <Page>
+          <Button secondary title="← Back" onPress={close} />
+          <Item r={report} />
+          <Text style={s.h2}>This might be mine</Text>
+          <Text style={s.muted}>
+            Choose your lost report. You will still need to answer the finder's
+            private ownership question before a return can be arranged.
+          </Text>
+          <ErrorText error={error || own.error?.message} />
+          {own.isLoading && <ActivityIndicator />}
+          {isOwn ? (
+            <Text style={s.notice}>This is your own found report.</Text>
+          ) : (
+            choices.map((r) => (
+              <Button
+                key={r.id}
+                title={`This may be my ${r.item_name}`}
+                disabled={busy}
+                onPress={async () => {
+                  setBusy(true);
+                  setError("");
+                  try {
+                    const out = await api(`/reports/${report.id}/claim`, {
+                      method: "POST",
+                      body: JSON.stringify({ lost_report_id: r.id }),
+                    });
+                    refresh();
+                    setMatchId(out.match_id);
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              />
+            ))
+          )}
+          {!own.isLoading && !isOwn && !choices.length && (
+            <Text style={s.notice}>
+              Create and publish a lost report in Reports first, then return
+              here to select it.
+            </Text>
+          )}
+          {matchId && (
+            <MatchScreen
+              id={matchId}
+              close={() => {
+                setMatchId(null);
+                close();
+              }}
+            />
+          )}
+        </Page>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+function MatchingDiagnostics({ id }: { id: string }) {
+  const d = useQuery<any>({
+    queryKey: ["diagnostics", id],
+    queryFn: () => api(`/reports/${id}/diagnostics`),
+    refetchInterval: 5000,
+  });
+  return (
+    <View style={s.verification}>
+      <Text style={s.h3}>Analysis and matching</Text>
+      <ErrorText error={d.error?.message} />
+      {d.isLoading && <ActivityIndicator />}
+      {d.data && (
+        <>
+          <Text style={s.muted}>
+            Gemini:{" "}
+            {d.data.gemini_configured
+              ? d.data.ai_state === "DONE"
+                ? "analysis completed"
+                : d.data.ai_state || "waiting"
+              : "not configured on the API server"}
+          </Text>
+          <Text style={s.muted}>
+            Search job: {d.data.job?.state || "not queued"}
+          </Text>
+          <Text style={s.muted}>
+            Photo comparison:{" "}
+            {d.data.has_image_evidence ? "prepared" : "not prepared / no photo"}
+          </Text>
+          {d.data.job?.last_error && (
+            <Text style={s.notice}>{d.data.job.last_error}</Text>
+          )}
+          {d.data.candidates.map((c: any) => (
+            <View key={c.report.id} style={{ marginTop: 12 }}>
+              <Text style={s.h3}>{c.report.item_name}</Text>
+              <Text style={s.muted}>
+                {c.reasons.length
+                  ? c.reasons.join("\n")
+                  : c.match_status
+                    ? `Match: ${c.match_status}`
+                    : "Eligible. Run Recheck matches and wait for the search job to finish."}
+              </Text>
+            </View>
+          ))}
+          {!d.data.candidates.length && (
+            <Text style={s.muted}>
+              No available found reports from other accounts in the latest 100
+              reports, or this is a found report.
+            </Text>
+          )}
+        </>
+      )}
+    </View>
   );
 }
 function Reports() {
@@ -399,6 +535,7 @@ function Reports() {
 
 function MobileReportTools({ report: r }: { report: Report }) {
   const [edit, setEdit] = useState(false),
+    [diagnose, setDiagnose] = useState(false),
     [name, setName] = useState(r.item_name),
     [color, setColor] = useState(r.color),
     [description, setDescription] = useState(r.ai_description || r.description),
@@ -407,6 +544,16 @@ function MobileReportTools({ report: r }: { report: Report }) {
   return (
     <>
       <ErrorText error={error} />
+      {r.status !== "DRAFT" && (
+        <Button
+          secondary
+          title={
+            diagnose ? "Hide matching details" : "Why no match? / Gemini status"
+          }
+          onPress={() => setDiagnose(!diagnose)}
+        />
+      )}
+      {diagnose && <MatchingDiagnostics id={r.id} />}
       {r.ai_description && <Text style={s.notice}>{r.ai_description}</Text>}
       {r.status === "DRAFT" && (
         <Button
@@ -571,7 +718,10 @@ function Matches() {
                 <Text
                   style={[s.badge, { alignSelf: "flex-start", marginTop: 20 }]}
                 >
-                  {Math.round(m.total_score)}% similarity ·{" "}
+                  {m.source === "MANUAL"
+                    ? "User requested claim"
+                    : `${Math.round(m.total_score)}% similarity`}{" "}
+                  ·{" "}
                   {m.status === "PROPOSED" ? "Unverified suggestion" : m.status}
                 </Text>
                 <Text style={s.small}>Compared with your report above</Text>
@@ -1294,7 +1444,11 @@ function MatchScreen({ id, close }: { id: string; close: () => void }) {
             <ActivityIndicator />
           ) : (
             <>
-              <Text style={s.h1}>{Math.round(v.total_score)}% match</Text>
+              <Text style={s.h1}>
+                {v.source === "MANUAL"
+                  ? "Ownership claim"
+                  : `${Math.round(v.total_score)}% match`}
+              </Text>
               <Text style={s.muted}>A suggestion, not proof of ownership.</Text>
               <Text style={s.small}>
                 Your {v.viewer_is_owner ? "lost" : "found"} report:{" "}

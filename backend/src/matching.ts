@@ -1,3 +1,4 @@
+import { samePhoto } from "./imageEvidence";
 export interface MatchItem {
   type: string;
   category: string;
@@ -8,7 +9,11 @@ export interface MatchItem {
   unique_features: string[];
   ai_features?: string[];
   location_id: string | null;
-  ai_analysis?: { object_type?: string; image_sha256?: string } | null;
+  ai_analysis?: {
+    object_type?: string;
+    image_sha256?: string;
+    image_signature?: string;
+  } | null;
   latitude?: number;
   longitude?: number;
   event_at: string;
@@ -97,8 +102,9 @@ export function score(a: MatchItem, b: MatchItem) {
     meaningful(b.item_name + " " + b.description),
   );
   const sameImage = Boolean(
-    a.ai_analysis?.image_sha256 &&
-    a.ai_analysis.image_sha256 === b.ai_analysis?.image_sha256,
+    (a.ai_analysis?.image_sha256 &&
+      a.ai_analysis.image_sha256 === b.ai_analysis?.image_sha256) ||
+    samePhoto(a.ai_analysis?.image_signature, b.ai_analysis?.image_signature),
   );
   const objectA = a.ai_analysis?.object_type || "",
     objectB = b.ai_analysis?.object_type || "";
@@ -123,6 +129,10 @@ export function score(a: MatchItem, b: MatchItem) {
     names,
     text,
     visualObject ? similarity(objectA, objectB) : 0,
+    similarity(
+      (a.ai_features || []).join(" "),
+      (b.ai_features || []).join(" "),
+    ),
   );
   const colorWeight = a.color.trim() && b.color.trim() ? 0.25 : 0;
   const brandWeight = a.brand.trim() && b.brand.trim() ? 0.2 : 0;
@@ -135,13 +145,10 @@ export function score(a: MatchItem, b: MatchItem) {
           0.25 * textEvidence)) /
       (0.55 + colorWeight + brandWeight);
   const location =
-    30 *
-    (Number.isFinite(meters)
-      ? Math.max(0, 1 - meters / 500)
-      : samePlace
-        ? 1
-        : 0);
-  const time = 20 * Math.exp(-hours / 48);
+    30 * (Number.isFinite(meters) ? 1 - meters / 500 / 3 : samePlace ? 1 : 0);
+  // Eligibility already caps time/radius. A duplicate photo within those bounds
+  // must not become impossible to match merely because optional features are empty.
+  const time = 10 + 10 * Math.exp(-hours / 48);
   const feature =
     10 * similarity(a.unique_features.join(" "), b.unique_features.join(" "));
   const round = (n: number) => Math.round(n * 100) / 100;
@@ -155,4 +162,33 @@ export function score(a: MatchItem, b: MatchItem) {
     ...parts,
     total_score: round(Object.values(parts).reduce((x, y) => x + y, 0)),
   };
+}
+
+export function matchReasons(a: MatchItem, b: MatchItem): string[] {
+  const reasons: string[] = [];
+  if (a.type === b.type) reasons.push("Reports must be LOST and FOUND.");
+  if (a.category !== b.category)
+    reasons.push(`Different categories: ${a.category} / ${b.category}.`);
+  const hours =
+    Math.abs(Date.parse(a.event_at) - Date.parse(b.event_at)) / 3600000;
+  if (!Number.isFinite(hours) || hours > 168)
+    reasons.push("Event dates are more than 7 days apart or invalid.");
+  const meters = distance(a, b);
+  if (
+    Number.isFinite(meters)
+      ? meters > 500
+      : !(a.location_id && a.location_id === b.location_id)
+  )
+    reasons.push(
+      Number.isFinite(meters)
+        ? "Locations are more than 500 m apart."
+        : "No shared venue or pair of GPS positions to compare.",
+    );
+  if (!reasons.length) {
+    const s = score(a, b);
+    if (!s) reasons.push("Not enough evidence that these are the same object.");
+    else if (s.total_score < 70)
+      reasons.push(`Similarity score ${s.total_score}/100 is below 70.`);
+  }
+  return reasons;
 }

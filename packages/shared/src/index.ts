@@ -58,6 +58,7 @@ export type Report = ReportInput & {
   ai_features?: string[];
 };
 export type Match = {
+  source?: "AUTOMATIC" | "MANUAL";
   viewer_is_owner?: boolean;
   id: string;
   lost_report_id: string;

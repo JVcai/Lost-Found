@@ -212,3 +212,20 @@ test("identical stored image pixels provide evidence without relying on AI names
     null,
   );
 });
+
+test("same photo remains eligible at the edge of the allowed radius and date window", () => {
+  const a = {
+    ...lost,
+    brand: "",
+    unique_features: [],
+    ai_analysis: { image_sha256: "same-photo" },
+  };
+  const b = {
+    ...a,
+    type: "FOUND",
+    latitude: a.latitude! + 0.00448,
+    event_at: "2026-01-08T10:00:00Z",
+  };
+  assert.ok(distance(a, b) < 500);
+  assert.ok(score(a, b)!.total_score >= 70);
+});

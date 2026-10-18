@@ -6,6 +6,7 @@ import { z } from "zod";
 import sharp, { type Metadata } from "sharp";
 import pino from "pino";
 import { loadConfig } from "./config";
+import { imageSignature } from "./imageEvidence";
 import { score } from "./matching";
 export const log = pino({
   redact: ["req.headers.authorization", "password", "answer", "token"],
@@ -118,6 +119,7 @@ export class Service {
     for (const row of pending) {
       const m = await this.match(row.id, actor);
       if (m.status !== "PROPOSED") continue;
+      if (m.source === "MANUAL") continue;
       const fresh = score(m.lost, m.found);
       if (!fresh || fresh.total_score < 70) {
         result(await this.db.rpc("invalidate_match", { mid: m.id }));
@@ -234,7 +236,7 @@ export class Service {
     }
   }
   async imageEvidence(r: any) {
-    if (r.ai_analysis?.image_sha256) return;
+    if (r.ai_analysis?.image_sha256 && r.ai_analysis?.image_signature) return;
     const images = result(
       await this.db
         .from("report_images")
@@ -249,7 +251,8 @@ export class Service {
         .from("item-images")
         .download(images[0].storage_path),
     );
-    const pixels = await sharp(Buffer.from(await file.arrayBuffer()))
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const pixels = await sharp(bytes)
       .rotate()
       .resize(256, 256, { fit: "inside" })
       .removeAlpha()
@@ -257,6 +260,7 @@ export class Service {
       .toBuffer();
     r.ai_analysis = {
       ...(r.ai_analysis || {}),
+      image_signature: await imageSignature(bytes),
       image_sha256: createHash("sha256").update(pixels).digest("hex"),
     };
     result(
@@ -285,7 +289,7 @@ export class Service {
         return;
       }
       await this.imageEvidence(r);
-      let aiError = false;
+      let aiError: string | null = null;
       const images = result(
         await this.db
           .from("report_images")
@@ -336,6 +340,7 @@ export class Service {
           r.ai_analysis = {
             ...analysis,
             image_sha256: r.ai_analysis?.image_sha256,
+            image_signature: r.ai_analysis?.image_signature,
           };
           r.ai_features = analysis.features;
           result(
@@ -350,9 +355,9 @@ export class Service {
               .eq("id", r.id),
           );
         } catch (e) {
-          aiError = true;
+          aiError = geminiFailure(e);
           log.warn(
-            { report: r.id },
+            { report: r.id, reason: aiError },
             "AI analysis failed; structured matching continues",
           );
           await this.db
@@ -361,7 +366,8 @@ export class Service {
             .eq("id", r.id);
         }
       } else if (images.length) {
-        aiError = true;
+        aiError =
+          "Gemini is not configured: set GEMINI_API_KEY in backend/.env and restart the API.";
         await this.db
           .from("reports")
           .update({ ai_state: "FAILED" })
@@ -394,7 +400,7 @@ export class Service {
           .update({
             state: aiError ? "FAILED" : "DONE",
             last_error: aiError
-              ? "AI unavailable; structured matching completed"
+              ? `${aiError} Structured matching completed.`
               : null,
           })
           .eq("id", job.id),
@@ -525,4 +531,23 @@ export class Service {
       throw e;
     }
   }
+}
+
+export function geminiFailure(error: unknown): string {
+  const status = Number((error as any)?.status || (error as any)?.code);
+  if (status === 400 || status === 401 || status === 403)
+    return (
+      "Gemini rejected the request: check the server API key, API access and region (HTTP " +
+      status +
+      ")."
+    );
+  if (status === 429)
+    return "Gemini quota or rate limit exceeded (HTTP 429). Check the Google AI Studio quota/billing and retry later.";
+  if (status === 404)
+    return "Gemini model unavailable (HTTP 404): check GEMINI_MODEL on the server.";
+  if (error instanceof z.ZodError || error instanceof SyntaxError)
+    return "Gemini returned an invalid analysis response. Retry analysis.";
+  if (status >= 500)
+    return "Gemini provider is temporarily unavailable. Retry later.";
+  return "Gemini request failed or timed out. Check server network access to generativelanguage.googleapis.com and retry.";
 }

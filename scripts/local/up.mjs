@@ -82,6 +82,7 @@ sql(
 sql(
   readFileSync(root + "database/migrations/003_matching_evidence.sql", "utf8"),
 );
+sql(readFileSync(root + "database/migrations/004_manual_claims.sql", "utf8"));
 sql(
   "grant usage on schema storage to service_role;grant all on all tables in schema storage to service_role;NOTIFY pgrst, 'reload schema';",
 );

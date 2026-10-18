@@ -298,6 +298,78 @@ async function main() {
       "REJECTED",
     );
 
+    await call(
+      `/reports/${lost.id}/diagnostics`,
+      outsider.token,
+      undefined,
+      "GET",
+      403,
+    );
+    const diagnostics = await call(
+      `/reports/${lost.id}/diagnostics`,
+      owner.token,
+    );
+    assert.equal(typeof diagnostics.gemini_configured, "boolean");
+    const candidate = diagnostics.candidates.find(
+      (c: any) => c.report.id === found.id,
+    );
+    assert.ok(candidate);
+    for (const key of [
+      "user_id",
+      "latitude",
+      "longitude",
+      "description",
+      "unique_features",
+      "ai_analysis",
+    ])
+      assert.equal(candidate.report[key], undefined);
+    const manual = await call(
+      `/reports/${found.id}/claim`,
+      owner.token,
+      { lost_report_id: unrelated.id },
+      "POST",
+      201,
+    );
+    const manualAgain = await call(
+      `/reports/${found.id}/claim`,
+      owner.token,
+      { lost_report_id: unrelated.id },
+      "POST",
+      201,
+    );
+    assert.equal(
+      manualAgain.match_id,
+      manual.match_id,
+      "Manual claim is idempotent",
+    );
+    const manualMatches = await call("/matches", owner.token);
+    assert.equal(
+      manualMatches.find((x: any) => x.id === manual.match_id)?.source,
+      "MANUAL",
+      "A manual claim survives algorithm reconciliation",
+    );
+    await call(
+      `/matches/${manual.match_id}/challenge`,
+      owner.token,
+      undefined,
+      "GET",
+      403,
+    );
+    await call(
+      `/reports/${found.id}/claim`,
+      outsider.token,
+      { lost_report_id: unrelated.id },
+      "POST",
+      403,
+    );
+    await call(
+      `/reports/${found.id}/claim`,
+      finder.token,
+      { lost_report_id: sameOwnerLost.id },
+      "POST",
+      400,
+    );
+
     const recorded = await db
       .from("matches")
       .select("*")
@@ -519,6 +591,95 @@ async function main() {
       .select("action")
       .eq("entity_id", m.id);
     assert.ok(audit.data?.some((a) => a.action === "ITEM_RETURNED"));
+    // Regression: different names + recompressed same photo, no brand/features,
+    // about 490m apart. Evidence must survive upload conversion and worker reads.
+    const stoneInput = {
+      ...input,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      category: "Jewelry",
+      item_name: "yellow diamond",
+      brand: "",
+      color: "yellow",
+      description: "",
+      unique_features: [],
+      event_at: new Date(Date.now() - 3600000).toISOString(),
+    };
+    const stoneLost = await call(
+      "/reports",
+      owner.token,
+      { ...stoneInput, type: "LOST" },
+      "POST",
+      201,
+    );
+    reports.push(stoneLost.id);
+    const stoneFound = await call(
+      "/reports",
+      finder.token,
+      {
+        ...stoneInput,
+        type: "FOUND",
+        item_name: "yellow stone",
+        latitude: location.latitude + 0.0044,
+        event_at: new Date().toISOString(),
+        verification_question: "What is engraved underneath?",
+        verification_answer: "Test initials AB",
+      },
+      "POST",
+      201,
+    );
+    reports.push(stoneFound.id);
+    const pattern = Buffer.alloc(128 * 128 * 3);
+    for (let y = 0; y < 128; y++)
+      for (let x = 0; x < 128; x++) {
+        const i = (y * 128 + x) * 3;
+        pattern[i] = x * 2;
+        pattern[i + 1] = y * 2;
+        pattern[i + 2] = (x + y) % 256;
+      }
+    const original = await sharp(pattern, {
+      raw: { width: 128, height: 128, channels: 3 },
+    })
+      .png()
+      .toBuffer();
+    const reencoded = await sharp(original).jpeg({ quality: 70 }).toBuffer();
+    for (const [report, token, bytes] of [
+      [stoneLost, owner.token, original],
+      [stoneFound, finder.token, reencoded],
+    ] as const) {
+      const form = new FormData();
+      form.append(
+        "image",
+        new Blob([new Uint8Array(bytes)], { type: "image/jpeg" }),
+        "photo.jpg",
+      );
+      await call(`/reports/${report.id}/images`, token, form, "POST", 201);
+      await call(`/reports/${report.id}/publish`, token, {}, "POST", 201);
+    }
+    let stoneMatch: any;
+    for (let i = 0; i < 25; i++) {
+      const ms = await call("/matches", owner.token);
+      stoneMatch = ms.find(
+        (x: any) =>
+          x.lost_report_id === stoneLost.id &&
+          x.found_report_id === stoneFound.id,
+      );
+      if (stoneMatch) break;
+      await sleep(1000);
+    }
+    assert.ok(
+      stoneMatch,
+      "Recompressed duplicate photo must create an automatic match at ~490m",
+    );
+    assert.equal(stoneMatch.source, "AUTOMATIC");
+    assert.ok(stoneMatch.total_score >= 70);
+    const stoneDetails = await call(
+      `/reports/${stoneLost.id}/diagnostics`,
+      owner.token,
+    );
+    assert.equal(stoneDetails.has_image_evidence, true);
+    if (!stoneDetails.gemini_configured)
+      assert.match(stoneDetails.job.last_error, /GEMINI_API_KEY/);
     console.log(
       "PASS: persistence, validated private uploads, automatic matching, notifications, RLS, authorization, ownership lockout, secure chat, audited staff return.",
     );

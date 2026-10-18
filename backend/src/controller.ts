@@ -15,6 +15,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { z } from "zod";
 import { reportSchema, registerSchema } from "@lostnet/shared";
+import { score, matchReasons } from "./matching";
 import { Service, fail, result } from "./service";
 const uuid = (id: string) => z.uuid().parse(id);
 const login = z.object({
@@ -28,11 +29,12 @@ export class Api {
     return { status: "ok", service: "Lost&Found API" };
   }
   @Get("ready") async ready() {
-    const r = await this.s.db
-      .from("reports")
-      .select("id,location_label")
-      .limit(1);
-    if (r.error) fail("Database not ready. Apply migrations 001 and 002", 503);
+    const r = await this.s.db.from("matches").select("id,source").limit(1);
+    if (r.error)
+      fail(
+        "Database not ready. Apply database migrations 001 through 004",
+        503,
+      );
     return {
       database: "ok",
       ai: this.s.config.GEMINI_API_KEY ? "configured" : "unconfigured",
@@ -233,6 +235,83 @@ export class Api {
       fail("This report is in an active return process");
     result(await this.s.db.rpc("close_report", { rid: id, actor }));
     return { ok: true };
+  }
+  @Post("reports/:id/claim") async claim(
+    @Headers("authorization") h: string,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const actor = await this.s.actor(h);
+    const { lost_report_id } = z
+      .object({ lost_report_id: z.uuid() })
+      .parse(body);
+    const lost = await this.s.report(lost_report_id, actor, true);
+    if (lost.user_id !== actor) fail("Select your own lost report", 403);
+    const match_id = result(
+      await this.s.db.rpc("request_claim", {
+        lid: lost_report_id,
+        fid: uuid(id),
+        actor,
+      }),
+    );
+    return { match_id };
+  }
+  @Get("reports/:id/diagnostics") async diagnostics(
+    @Headers("authorization") h: string,
+    @Param("id") id: string,
+  ) {
+    const actor = await this.s.actor(h);
+    const r = await this.s.report(uuid(id), actor, true);
+    const job = result(
+      await this.s.db
+        .from("jobs")
+        .select("state,last_error,attempts")
+        .eq("report_id", id)
+        .maybeSingle(),
+    );
+    const opposite = result(
+      await this.s.db
+        .from("reports")
+        .select("*")
+        .neq("user_id", actor)
+        .eq("type", r.type === "LOST" ? "FOUND" : "LOST")
+        .in("status", ["ACTIVE", "FOUND", "STORED", "MATCH_FOUND"])
+        .order("created_at", { ascending: false })
+        .limit(100),
+    );
+    const pairs = result(
+      await this.s.db
+        .from("matches")
+        .select("lost_report_id,found_report_id,status")
+        .or(`lost_report_id.eq.${id},found_report_id.eq.${id}`),
+    );
+    // Do not expose private LOST reports or counterpart coordinates/AI/description.
+    const candidates =
+      r.type === "LOST"
+        ? await Promise.all(
+            opposite.map(async (c) => {
+              const pair = pairs.find((p) => p.found_report_id === c.id);
+              const reasons = matchReasons(r, c);
+              if (pair?.status === "REJECTED")
+                reasons.unshift(
+                  "This pair was rejected. Explicit rejections are not reopened automatically.",
+                );
+              return {
+                report: await this.s.safeReport(c),
+                reasons,
+                score: score(r, c)?.total_score ?? null,
+                match_status: pair?.status ?? null,
+              };
+            }),
+          )
+        : [];
+    return {
+      ai_state: r.ai_state,
+      gemini_configured: Boolean(this.s.config.GEMINI_API_KEY),
+      has_image_evidence: Boolean(r.ai_analysis?.image_sha256),
+      job,
+      candidates,
+    };
   }
   @Post("reports/:id/recheck") async recheck(
     @Headers("authorization") h: string,
