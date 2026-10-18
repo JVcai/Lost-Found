@@ -13,6 +13,6 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm run export:web -w mobile
+      - run: npm run export:native -w mobile
         env:
           EXPO_NO_TELEMETRY: '1'

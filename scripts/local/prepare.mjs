@@ -58,7 +58,7 @@ writeFileSync(
             GOTRUE_DB_DRIVER: "postgres",
             GOTRUE_DB_DATABASE_URL: `postgres://postgres:${dbPassword}@db:5432/postgres?search_path=auth`,
             GOTRUE_DB_NAMESPACE: "auth",
-            GOTRUE_SITE_URL: "http://localhost:5173",
+            GOTRUE_SITE_URL: "lostnet://auth",
             GOTRUE_JWT_SECRET: secret,
             GOTRUE_JWT_AUD: "authenticated",
             GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated",
@@ -114,7 +114,6 @@ writeFileSync(
 
 for (const [app, text] of Object.entries({
   backend: `SUPABASE_URL=http://127.0.0.1:54321\nSUPABASE_ANON_KEY=${anon}\nSUPABASE_SERVICE_ROLE_KEY=${service}\nPORT=3000\n`,
-  admin: `VITE_SUPABASE_URL=http://127.0.0.1:54321\nVITE_SUPABASE_ANON_KEY=${anon}\nVITE_API_URL=http://localhost:3000\n`,
   mobile: `EXPO_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321\nEXPO_PUBLIC_SUPABASE_ANON_KEY=${anon}\nEXPO_PUBLIC_API_URL=http://localhost:3000\n`,
 })) {
   if (!existsSync(root + app + "/.env"))

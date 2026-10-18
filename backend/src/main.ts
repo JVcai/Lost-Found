@@ -42,7 +42,9 @@ async function main() {
   const s = app.get(Service);
   app.use(helmet());
   app.enableCors({
-    origin: s.config.CORS_ORIGINS.split(",").map((v) => v.trim()),
+    origin: s.config.CORS_ORIGINS.split(",")
+      .map((v) => v.trim())
+      .filter(Boolean),
   });
   app.use(
     "/auth",

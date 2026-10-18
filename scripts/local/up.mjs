@@ -77,5 +77,5 @@ sql(
   "grant usage on schema storage to service_role;grant all on all tables in schema storage to service_role;NOTIFY pgrst, 'reload schema';",
 );
 console.log(
-  "Local development services ready. Existing .env files were preserved. Start local:gateway, dev:api and dev:admin in separate terminals. This fixture has no Realtime, SMTP or external AI/push configuration.",
+  "Local development services ready. Existing .env files were preserved. Start local:gateway, dev:api and dev:mobile in separate terminals. This fixture has no Realtime, SMTP or external AI/push configuration.",
 );

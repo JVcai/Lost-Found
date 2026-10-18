@@ -1,13 +1,18 @@
 {
   "expo": {
-    "name": "LostNet",
+    "name": "Lost&Found",
     "slug": "lostnet",
     "scheme": "lostnet",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "ios": { "supportsTablet": true, "bundleIdentifier": "app.lostnet.mobile" },
-    "android": { "package": "app.lostnet.mobile" },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.lostnet.mobile"
+    },
+    "android": {
+      "package": "app.lostnet.mobile"
+    },
     "plugins": [
       [
         "expo-image-picker",
@@ -25,6 +30,6 @@
       "expo-secure-store",
       "expo-notifications"
     ],
-    "web": { "bundler": "metro" }
+    "platforms": ["android", "ios"]
   }
 }

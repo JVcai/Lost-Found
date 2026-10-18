@@ -1,3 +1,5 @@
+> Historical product brief. Current scope is mobile-only Lost&Found. The web/admin requirements below are superseded by README.md and docs/STATUS.md.
+
 Да. Ниже ТЗ уже не для учебного прототипа, а для **полноценной рабочей версии LostNet**, которую можно отдавать разработчику или использовать как основу для разработки.
 
 # Техническое задание — LostNet

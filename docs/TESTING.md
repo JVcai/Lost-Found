@@ -1,38 +1,33 @@
-# Verification
+# Testing Lost&Found
 
 ```bash
 npm ci
 npm run typecheck
 npm test
 npm run build
-EXPO_NO_TELEMETRY=1 npm run export:web -w mobile
+EXPO_NO_TELEMETRY=1 npm run export:native -w mobile
 ```
 
-Unit tests check matching weights, geographic exclusion, empty/Unicode feature comparison, chronology and report/registration validation. They do not simulate successful external-service calls.
+Type checks cover mobile/backend/shared. Build compiles the backend/shared packages. Native export bundles Android/iOS JavaScript and assets; it does not sign native binaries or test a real device. Web/browser tests and Vite have been removed with the web application.
 
-## Browser smoke tests
+## Matching / API acceptance
 
-With no `admin/.env`, run `npm run dev:admin` in one terminal, then `npm run test:browser` in another. Uses system Chromium by default; set `CHROMIUM_PATH` for another browser executable. Checks explicit setup instructions, no runtime JS errors, mobile navigation and no horizontal overflow.
-
-## API acceptance against disposable Supabase
-
-**Use a disposable test project only.** The script creates five confirmed test accounts with administrator credentials and cleans up only those accounts and their data afterwards. It needs the schema, reference seed and running API. It does not stub Auth, PostgreSQL or Storage.
+Against a **disposable** Supabase project with schema/seed applied and API running:
 
 ```bash
-# Run from repository root, with backend pointing at the same disposable project.
 ALLOW_TEST_USERS=true DOTENV_CONFIG_PATH=backend/.env npm run test:acceptance
 ```
 
-Checks persisted reports after independent requests, actual image validation/storage, public data projection, unauthorized users, direct RLS reads, denied private hashes/RPC calls, worker matching, in-app notification, five-attempt lockout, ownership verification, participant chat, staff-only physical return, read-only returned chat and audit event. There is a 25s wait for matching. It requires no Gemini or push token; it does not establish AI or device push delivery.
+Windows cmd equivalent:
 
-Connected browser coverage: `LIVE_BROWSER=true DOTENV_CONFIG_PATH=backend/.env npx playwright test tests/live.spec.ts` against a disposable project with `admin/.env` pointing to it. This test signs in, creates a report through the form, reloads it and opens the staff desk.
-
-For real-service acceptance, separately verify Gemini output in `reports.ai_description`, `ai_features` and `ai_state`, register a physical device, and check `push_deliveries` reaches `DELIVERED`. Test native camera, permissions, reconnect, expired sessions, slow/failing providers and notification handling on both platforms.
-
-Expo web UI check (with Metro running using `EXPO_NO_TELEMETRY=1 npm run start -w mobile -- --offline`):
-
-```bash
-LIVE_BROWSER=true DOTENV_CONFIG_PATH=backend/.env npx playwright test tests/mobile-web.spec.ts
+```cmd
+set ALLOW_TEST_USERS=true
+set DOTENV_CONFIG_PATH=backend/.env
+npm run test:acceptance
 ```
 
-This checks the React Native web rendering path. It is not a native Android/iOS device test. See [validation results](VALIDATION.md).
+Creates and removes its own confirmed test identities using the administrator key. Never point it at a production project. Tests real Auth, PostgreSQL and Storage, report persistence, photo validation, candidate selection excluding the same user, matching across different users, notifications, RLS/authorization failures, ownership attempts/lockout, private text/image chat and audited staff return. It also checks that a losing claim does not strand another lost report in VERIFYING.
+
+Manual phone check: use two accounts/phones. Publish LOST as A and FOUND as B with the same category/location and similar text, color, brand, private features and time. Found needs a photo and ownership challenge. Wait for 70+ match, then verify as A and chat. The finder must not confirm ownership as the lost-item owner. To check handover, use an account with staff membership and open Profile → Staff desk.
+
+Gemini requires a real key and quota; check `reports.ai_state`, `ai_analysis` and `ai_description`. Native push requires physical devices, EAS credentials and a development build. Check both iOS/Android camera, location, reconnect and staff desk. Native UI interactions, push and recovery links are not established by source/bundle tests.

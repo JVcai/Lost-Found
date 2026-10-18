@@ -10,9 +10,7 @@ export function loadConfig() {
       GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
       EXPO_PUSH_ACCESS_TOKEN: z.string().optional(),
       PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-      CORS_ORIGINS: z
-        .string()
-        .default("http://localhost:5173,http://localhost:8081"),
+      CORS_ORIGINS: z.string().default(""),
     })
     .parse(process.env);
 }

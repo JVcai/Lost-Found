@@ -141,7 +141,7 @@ function Auth() {
     [busy, setBusy] = useState(false);
   return (
     <Page>
-      <Text style={s.wordmark}>✳ LostNet.</Text>
+      <Text style={s.wordmark}>✳ Lost&Found</Text>
       <View style={{ height: 35 }} />
       <Text style={s.eyebrow}>GOOD THINGS FIND THEIR WAY BACK</Text>
       <Text style={s.h1}>
@@ -418,18 +418,11 @@ function MobileReportTools({ report: r }: { report: Report }) {
                 { compress: 0.8, format: Manipulator.SaveFormat.JPEG },
               );
               const fd = new FormData();
-              if (Platform.OS === "web")
-                fd.append(
-                  "image",
-                  await (await fetch(out.uri)).blob(),
-                  "item.jpg",
-                );
-              else
-                fd.append("image", {
-                  uri: out.uri,
-                  name: "item.jpg",
-                  type: "image/jpeg",
-                } as any);
+              fd.append("image", {
+                uri: out.uri,
+                name: "item.jpg",
+                type: "image/jpeg",
+              } as any);
               await api(`/reports/${r.id}/images`, {
                 method: "POST",
                 body: fd,
@@ -590,7 +583,8 @@ function Inbox() {
 function Profile() {
   const q = useQuery<any>({ queryKey: ["me"], queryFn: () => api("/me") });
   const [notice, setNotice] = useState(""),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [staffOpen, setStaffOpen] = useState(false);
   return (
     <Page>
       <Text style={s.h1}>Your profile</Text>
@@ -614,7 +608,7 @@ function Profile() {
         onPress={async () => {
           setError("");
           try {
-            if (!Device.isDevice || Platform.OS === "web")
+            if (!Device.isDevice)
               throw new Error("Use a physical iOS or Android device");
             if (Platform.OS === "android")
               await Notifications.setNotificationChannelAsync("default", {
@@ -642,12 +636,15 @@ function Profile() {
           }
         }}
       />
-      {!!q.data?.memberships?.length && (
-        <Text style={s.notice}>
-          Open the web staff desk to manage storage and confirm physical
-          returns.
-        </Text>
+      {(q.data?.memberships?.length > 0 ||
+        q.data?.role === "PLATFORM_ADMIN") && (
+        <Button
+          secondary
+          title="Staff desk"
+          onPress={() => setStaffOpen(true)}
+        />
       )}
+      {staffOpen && <MobileStaffDesk close={() => setStaffOpen(false)} />}
       <ErrorText error={q.error?.message || error} />
       {!!notice && <Text style={s.notice}>{notice}</Text>}
       <Button
@@ -663,6 +660,147 @@ function Profile() {
         }}
       />
     </Page>
+  );
+}
+function MobileStaffDesk({ close }: { close: () => void }) {
+  const reports = useQuery<Report[]>({
+    queryKey: ["staff-reports"],
+    queryFn: () => api("/staff/reports"),
+  });
+  const matches = useQuery<Match[]>({
+    queryKey: ["staff-matches"],
+    queryFn: () => api("/staff/matches"),
+  });
+  const [selected, setSelected] = useState<string | null>(null),
+    [storage, setStorage] = useState<Report | null>(null),
+    [point, setPoint] = useState(""),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [handover, setHandover] = useState<Match | null>(null);
+  const run = async (path: string, body: any, method = "POST") => {
+    setBusy(true);
+    setError("");
+    try {
+      await api(path, { method, body: JSON.stringify(body) });
+      await refresh();
+      setStorage(null);
+      setHandover(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal visible animationType="slide" onRequestClose={close}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#f7f8fa" }}>
+        <Page>
+          <Button secondary title="← Back to profile" onPress={close} />
+          <Text style={s.h1}>Staff desk</Text>
+          <ErrorText
+            error={reports.error?.message || matches.error?.message || error}
+          />
+          <Text style={s.h2}>Ready for handover</Text>
+          {matches.isLoading && <ActivityIndicator />}
+          {matches.data
+            ?.filter((m) => m.status === "VERIFIED")
+            .map((m) => (
+              <View style={[s.card, { padding: 18 }]} key={m.id}>
+                <Text style={s.h3}>{m.found?.item_name}</Text>
+                <Text style={s.muted}>
+                  {m.found?.location_name} · Ownership verified
+                </Text>
+                <Button
+                  secondary
+                  title="Open conversation"
+                  onPress={() => setSelected(m.id)}
+                />
+                <Button
+                  title="Confirm physical return"
+                  disabled={busy}
+                  onPress={() => setHandover(m)}
+                />
+              </View>
+            ))}
+          {matches.data &&
+            !matches.data.some((m) => m.status === "VERIFIED") && (
+              <Text style={s.muted}>No verified handovers waiting.</Text>
+            )}
+          {handover && (
+            <View style={s.verification}>
+              <Text style={s.h3}>
+                Has the item been handed to its verified owner?
+              </Text>
+              <Text style={s.muted}>
+                This marks both reports returned and makes the conversation
+                read-only.
+              </Text>
+              <Button
+                title="Yes, item returned"
+                disabled={busy}
+                onPress={() => run(`/matches/${handover.id}/return`, {})}
+              />
+              <Button
+                secondary
+                title="Cancel handover"
+                disabled={busy}
+                onPress={() => setHandover(null)}
+              />
+            </View>
+          )}
+          <Text style={s.h2}>Organization reports</Text>
+          {reports.isLoading && <ActivityIndicator />}
+          {reports.data?.map((r) => (
+            <View key={r.id}>
+              <Item r={r} />
+              {r.storage_location && (
+                <Text style={s.muted}>Storage: {r.storage_location}</Text>
+              )}
+              {r.type === "FOUND" && ["FOUND", "STORED"].includes(r.status) && (
+                <Button
+                  secondary
+                  title="Assign storage"
+                  onPress={() => {
+                    setStorage(r);
+                    setPoint(r.storage_location || "");
+                  }}
+                />
+              )}
+              {storage?.id === r.id && (
+                <View style={s.verification}>
+                  <Field label="Storage point" value={point} set={setPoint} />
+                  <Button
+                    title="Save storage"
+                    disabled={busy || !point.trim()}
+                    onPress={() =>
+                      run(
+                        `/staff/reports/${r.id}/store`,
+                        { storage_location: point },
+                        "PATCH",
+                      )
+                    }
+                  />
+                  <Button
+                    secondary
+                    title="Cancel storage"
+                    onPress={() => setStorage(null)}
+                  />
+                </View>
+              )}
+            </View>
+          ))}
+          {reports.data?.length === 0 && (
+            <Empty
+              title="No organization reports"
+              text="Reports at your organization's locations will appear here."
+            />
+          )}
+          {selected && (
+            <MatchScreen id={selected} close={() => setSelected(null)} />
+          )}
+        </Page>
+      </SafeAreaView>
+    </Modal>
   );
 }
 function ReportForm({
@@ -742,7 +880,7 @@ function ReportForm({
               </Text>
               <Text style={s.muted}>
                 {type === "FOUND"
-                  ? "Your found report has been received. LostNet will compare it with active lost reports."
+                  ? "Your found report has been received. Lost&Found will compare it with active lost reports."
                   : "Your lost report is saved. New matches will appear in your inbox."}
               </Text>
               <Button title="Back to my community" onPress={close} />
@@ -944,15 +1082,11 @@ function ReportForm({
                     }
                     if (image && !uploaded) {
                       const fd = new FormData();
-                      if (Platform.OS === "web") {
-                        const blob = await (await fetch(image)).blob();
-                        fd.append("image", blob, "item.jpg");
-                      } else
-                        fd.append("image", {
-                          uri: image,
-                          name: "item.jpg",
-                          type: "image/jpeg",
-                        } as any);
+                      fd.append("image", {
+                        uri: image,
+                        name: "item.jpg",
+                        type: "image/jpeg",
+                      } as any);
                       await api(`/reports/${id}/images`, {
                         method: "POST",
                         body: fd,
@@ -1141,18 +1275,11 @@ function MatchScreen({ id, close }: { id: string; close: () => void }) {
                               },
                             );
                             const fd = new FormData();
-                            if (Platform.OS === "web")
-                              fd.append(
-                                "image",
-                                await (await fetch(out.uri)).blob(),
-                                "chat.jpg",
-                              );
-                            else
-                              fd.append("image", {
-                                uri: out.uri,
-                                name: "chat.jpg",
-                                type: "image/jpeg",
-                              } as any);
+                            fd.append("image", {
+                              uri: out.uri,
+                              name: "chat.jpg",
+                              type: "image/jpeg",
+                            } as any);
                             await api(`/matches/${id}/images`, {
                               method: "POST",
                               body: fd,
@@ -1218,7 +1345,7 @@ function Root() {
     return (
       <SafeAreaView style={{ flex: 1 }}>
         <Page>
-          <Text style={s.wordmark}>✳ LostNet.</Text>
+          <Text style={s.wordmark}>✳ Lost&Found</Text>
           <View style={{ height: 50 }} />
           <Text style={s.h1}>A home for everything that’s missing.</Text>
           <Text style={s.muted}>
@@ -1251,7 +1378,7 @@ function Root() {
     <NavigationContainer>
       <Tab.Navigator
         screenOptions={({ route }) => ({
-          headerTitle: "✳ LostNet.",
+          headerTitle: "✳ Lost&Found",
           headerTitleStyle: {
             fontWeight: "800",
             color: "#196137",

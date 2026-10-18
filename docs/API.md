@@ -1,4 +1,4 @@
-# API
+# Lost&Found API
 
 JSON REST API, default port 3000. All routes except `/health`, `/ready`, and `/auth/*` require `Authorization: Bearer <Supabase access_token>`. Clients refresh sessions with the Supabase SDK. Errors use `{error,message}`; database internals are not returned. List routes currently cap results at 100 (staff reports 200). Pagination must be added before large datasets.
 

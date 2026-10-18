@@ -1,10 +1,9 @@
 {
-  "name": "lostnet",
+  "name": "lost-found",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
     "backend",
-    "admin",
     "mobile",
     "packages/shared"
   ],
@@ -13,20 +12,17 @@
   },
   "scripts": {
     "dev:api": "npm run dev -w backend",
-    "dev:admin": "npm run dev -w admin",
     "dev:mobile": "npm run start -w mobile",
-    "build": "npm run build -w @lostnet/shared && npm run build -w backend && npm run build -w admin",
+    "build": "npm run build -w @lostnet/shared && npm run build -w backend",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test -w backend",
     "postinstall": "npm run build -w @lostnet/shared",
     "test:acceptance": "tsx scripts/acceptance.ts",
-    "test:browser": "playwright test tests/browser.spec.ts",
     "local:up": "node scripts/local/up.mjs",
     "local:gateway": "node scripts/local/gateway.mjs",
     "local:down": "node scripts/local/down.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
     "prettier": "^3.9.10"
   }
 }

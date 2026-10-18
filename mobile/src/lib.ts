@@ -1,5 +1,4 @@
 import "react-native-url-polyfill/auto";
-import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { createClient } from "@supabase/supabase-js";
 import { create } from "zustand";
@@ -7,21 +6,11 @@ import type { Session } from "@supabase/supabase-js";
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL,
   key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 export const configured = Boolean(url && key);
-// Native refresh tokens are stored in Keychain / Android Keystore. Web sessions are memory-only.
-const memory = new Map<string, string>();
+// Refresh tokens stay in iOS Keychain / Android Keystore.
 const storage = {
-  getItem: (k: string) =>
-    Platform.OS === "web"
-      ? Promise.resolve(memory.get(k) || null)
-      : SecureStore.getItemAsync(k),
-  setItem: (k: string, v: string) =>
-    Platform.OS === "web"
-      ? Promise.resolve(void memory.set(k, v))
-      : SecureStore.setItemAsync(k, v),
-  removeItem: (k: string) =>
-    Platform.OS === "web"
-      ? Promise.resolve(void memory.delete(k))
-      : SecureStore.deleteItemAsync(k),
+  getItem: (k: string) => SecureStore.getItemAsync(k),
+  setItem: (k: string, v: string) => SecureStore.setItemAsync(k, v),
+  removeItem: (k: string) => SecureStore.deleteItemAsync(k),
 };
 export const supabase = configured
   ? createClient(url!, key!, {

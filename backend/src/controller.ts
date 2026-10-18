@@ -25,7 +25,7 @@ const login = z.object({
 export class Api {
   constructor(@Inject(Service) private readonly s: Service) {}
   @Get("health") health() {
-    return { status: "ok", service: "LostNet API" };
+    return { status: "ok", service: "Lost&Found API" };
   }
   @Get("ready") async ready() {
     const r = await this.s.db.from("locations").select("id").limit(1);

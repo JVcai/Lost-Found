@@ -120,6 +120,21 @@ async function main() {
     );
     reports.push(lost2.id);
     await call(`/reports/${lost2.id}/publish`, locked.token, {}, "POST", 201);
+    const sameOwnerLost = await call(
+      "/reports",
+      finder.token,
+      { ...input, type: "LOST" },
+      "POST",
+      201,
+    );
+    reports.push(sameOwnerLost.id);
+    await call(
+      `/reports/${sameOwnerLost.id}/publish`,
+      finder.token,
+      {},
+      "POST",
+      201,
+    );
     const found = await call(
       "/reports",
       finder.token,
@@ -166,6 +181,16 @@ async function main() {
       201,
     );
     await call(`/reports/${found.id}/publish`, finder.token, {}, "POST", 201);
+    const candidates = await db.rpc("nearby_candidates", { rid: found.id });
+    if (candidates.error) throw candidates.error;
+    assert.ok(
+      candidates.data.some((r: any) => r.id === lost.id),
+      "Different-account candidate must be eligible",
+    );
+    assert.ok(
+      !candidates.data.some((r: any) => r.id === sameOwnerLost.id),
+      "Same-account lost/found reports must never be matched",
+    );
     const persisted = await call("/reports/my", owner.token);
     assert.ok(persisted.some((r: any) => r.id === lost.id));
     await call(`/reports/${lost.id}`, outsider.token, undefined, "GET", 403);

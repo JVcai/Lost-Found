@@ -2,7 +2,6 @@ FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/package.json
-COPY admin/package.json admin/package.json
 COPY mobile/package.json mobile/package.json
 COPY packages/shared packages/shared
 RUN --mount=type=secret,id=network_ca \
@@ -17,7 +16,6 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/package.json
-COPY admin/package.json admin/package.json
 COPY mobile/package.json mobile/package.json
 COPY packages/shared/package.json packages/shared/package.json
 RUN --mount=type=secret,id=network_ca \

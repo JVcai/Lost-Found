@@ -1,83 +1,88 @@
-# LostNet
+# Lost&Found
 
-Mobile-first Lost & Found: Expo / React Native + TypeScript → NestJS API → Supabase Auth, PostgreSQL, Storage, Realtime → Gemini + Expo Push.
+Мобильное приложение для поиска потерянных и найденных вещей: **React Native + Expo + TypeScript → NestJS → Supabase → Gemini / Expo Push**. Поддерживаются Android и iOS. Веб-версия и отдельная панель браузера удалены.
 
-This repository implements a first development version. It is **not yet a production release**. The hosted Supabase/Gemini setup, real-device notifications, native releases, load and operational acceptance must be completed before launch. See [current coverage and limitations](docs/STATUS.md).
+## Структура
 
-## Structure
+- `mobile/` — приложение: авторизация, Lost/Found, фото, GPS, matching, уведомления, проверка владельца, чат и кабинет сотрудника в профиле.
+- `backend/` — API, права доступа, обработка фото, очередь matching и push.
+- `database/` — миграция Supabase, RLS, Storage и стартовые места.
+- `packages/shared/` — общие типы и валидация.
+- `docs/` — подключение, API, ограничения и проверки.
 
-- `mobile/` — Expo app, bottom tabs, registration/login, camera/gallery, optional GPS, reports, matches, ownership and chat.
-- `backend/` — NestJS REST API, validation, private uploads, authorization, durable processing jobs, matching, Gemini and Expo Push adapters.
-- `admin/` — responsive React staff/community workspace. Organization staff can assign storage and confirm verified returns.
-- `database/` — Supabase SQL migration, private Storage bucket, RLS, PostGIS and optional reference locations.
-- `packages/shared/` — shared Zod schemas and TypeScript types.
-- `docs/` — API, deployment, verification and scope notes.
+Название приложения и заголовки — **Lost&Found**. Технические идентификаторы `@lostnet/*`, Expo slug/scheme и Android/iOS package IDs сохранены для совместимости существующих установок и импортов; переустановка базы не нужна.
 
-## Requirements
+## Запуск на Windows с облачным Supabase
 
-Node.js 22+ (tested on 24), npm 11, a Supabase project. Gemini is required for image analysis; without it, structured text/location/time/feature matching still runs and AI is explicitly marked failed. Push needs a physical device, Expo EAS project and a development build.
+Требования: Node.js 22+ (проверено на 24), npm, проект Supabase. Из папки репозитория:
 
-```bash
-npm ci --cache /workspace/.npm
+```cmd
+npm ci
+copy backend\.env.example backend\.env
+copy mobile\.env.example mobile\.env
+```
+
+Существующие `.env` не перезаписывайте. Заполните `backend/.env` URL, anon key, server-only service-role key и Gemini key. В `mobile/.env` нужны только публичный URL Supabase, anon key и адрес API. Секреты Gemini/service-role не должны иметь префикс `EXPO_PUBLIC_` и не должны попадать в мобильный код или Git.
+
+В новом Supabase один раз выполните `database/migrations/001_initial.sql`, затем `database/seed.sql`. Если вы уже выполняли миграцию, повторять её после этого обновления не нужно. Включите Email Auth. Подтверждение почты требует SMTP; для изолированного теста его можно временно отключить. Полноценный native-сценарий восстановления пароля по deep link пока не реализован — см. STATUS.md.
+
+Терминал 1:
+
+```cmd
+npm run dev:api
+```
+
+Терминал 2:
+
+```cmd
+npm run dev:mobile
+```
+
+Если Expo CLI не проходит удалённую сетевую проверку, используйте:
+
+```cmd
+npm run start -w mobile -- --offline
+```
+
+Это отключает сетевые проверки самого CLI, а не запросы приложения к API/Supabase.
+
+На телефоне установите Expo Go, совместимый с **SDK 54**, и отсканируйте QR-код. Текущий Expo Go из магазина может требовать другую версию SDK; Android-версию можно подобрать на expo.dev/go. Для native push и выпуска приложения требуется EAS development/release build.
+
+Телефон и компьютер должны быть в одной сети. В `mobile/.env` используйте LAN IPv4 компьютера, например `EXPO_PUBLIC_API_URL=http://192.168.1.10:3000`, а не localhost. Разрешите Node.js в брандмауэре для частной сети. С телефона проверьте `/health` по этому адресу. Backend `/ready` должен показывать `database=ok`; `ai=configured` означает наличие ключа, а не проверенный ответ Gemini. После изменения `.env` перезапустите соответствующий процесс; Expo можно перезапустить с `npm run start -w mobile -- --clear`.
+
+Нативным приложениям браузерный CORS не требуется. `CORS_ORIGINS` по умолчанию пустой; старые настройки 5173 больше не нужны. Старую локальную папку `admin`, если в ней после `git pull` остались только `.env`/сборки, можно удалить после переноса нужных серверных настроек в `backend/.env`.
+
+## Как проверить matching
+
+Отчёты одного пользователя **намеренно не сопоставляются**.
+
+1. Аккаунт A: создайте и опубликуйте LOST: категория Bags, имя Black Nike backpack, brand Nike, color Black, description Black backpack with blue keychain, unique features blue keychain.
+2. Выйдите и войдите аккаунтом B (или используйте второй телефон). Создайте FOUND с такими же полями, той же локацией и близким временем. Добавьте фото, приватный вопрос и ответ; завершите публикацию.
+3. Через несколько секунд откройте Matches. Система выбирает противоположный тип, другую учётную запись, одинаковую категорию, время в пределах 7 дней и ту же локацию либо радиус до 500 м. Порог совпадения — 70 баллов.
+4. Вернитесь в аккаунт A, подтвердите match и ответьте на вопрос. Откроется чат. Уведомление внутри приложения не требует настройки push.
+
+Gemini расширяет признаки по фото; базовое структурированное сопоставление работает и без него. Похожее фото само по себе не гарантирует высокий score.
+
+## Сотрудники
+
+Администратор базы назначает существующему пользователю членство:
+
+```sql
+insert into public.staff_members(organization_id,user_id,role)
+values ('a1000000-0000-4000-8000-000000000001','<staff-user-uuid>','STAFF');
+```
+
+После входа сотрудник открывает **Profile → Staff desk**: отчёты организации, назначение места хранения, чат и подтверждение физического возврата после проверки владельца. Обычный пользователь не может назначить себе роль или оформить возврат через этот API.
+
+## Проверки
+
+```cmd
 npm run typecheck
 npm test
 npm run build
+npm run export:native -w mobile
 ```
 
-The custom npm cache is useful in this cloud environment; elsewhere `npm ci` is sufficient. `postinstall` builds the shared package. Lockfile is committed.
+Последняя команда проверяет JS/assets bundles Android/iOS; она не создаёт подписанные APK/IPA. Для приёмочного теста с отдельными пользователями см. [TESTING.md](docs/TESTING.md). Это тест только для disposable-проекта.
 
-## Try locally without cloud keys
-
-Run `npm run local:up`, then start `npm run local:gateway`, `npm run dev:api` and `npm run dev:admin` in separate terminals. Docker is required. Existing `.env` files are preserved; local files are generated only when missing. See [local setup and its limits](docs/LOCAL.md).
-
-## Connect Supabase
-
-1. Create a Supabase project. In **SQL Editor**, run `database/migrations/001_initial.sql`, then optionally `database/seed.sql`. The migration is one-time; do not repeatedly run it against an existing schema.
-2. Enable email/password authentication. Keep email confirmation enabled in production. Set Site URL and allowed redirect URLs for your web deployment in Auth settings. Configure SMTP before production.
-3. Copy each application's `.env.example` to `.env`. Obtain URL, anon key and **server-only service-role key** from Supabase project settings. Put the service-role and Gemini keys only in `backend/.env` or your backend host's secret settings. Never send them in chat or commit them.
-4. Add your Gemini key on the backend. Set `CORS_ORIGINS` to the exact allowed web origins. No JWT secret is needed: Supabase Auth validates access tokens.
-5. Sign up using the UI and verify the email. Create a second account to act as the finder. Configure a staff account with the SQL below.
-
-```sql
--- Run as the database administrator. Replace UUIDs with real auth user IDs.
-insert into public.staff_members(organization_id,user_id,role)
-values ('a1000000-0000-4000-8000-000000000001','<staff-user-id>','STAFF');
--- ORG_ADMIN is reserved for organization management. No client can self-promote.
-```
-
-No service keys are needed by the clients. The anon key is public by design; RLS and the API enforce access.
-
-## Run
-
-Use the existing checkout. Cloud tasks are isolated; do not create worktrees unless explicitly requested.
-
-```bash
-# terminal 1 — loads backend/.env
-npm run dev:api
-# terminal 2 — loads admin/.env
-npm run dev:admin
-# terminal 3 — loads mobile/.env
-EXPO_NO_TELEMETRY=1 npm run start -w mobile -- --offline
-```
-
-The API uses port 3000, Vite 5173, Expo 8081. Check API `/health` and `/ready` with local requests. `/ready` verifies the database and reports whether AI credentials are configured; it does not verify Gemini billing or push delivery.
-
-For a physical phone, change `EXPO_PUBLIC_API_URL` to a reachable LAN/HTTPS address. Do not use the phone's `localhost` for a remote server. Camera/location permissions are requested on use. Expo SDK 54 push notifications on Android require a development build, not Expo Go. Register push from the Profile tab after setting your EAS project ID.
-
-## Acceptance workflow
-
-See [testing](docs/TESTING.md) for an executable API acceptance scenario and browser tests. The intended real-service acceptance flow is:
-
-1. Owner and finder sign up and verify their emails.
-2. Owner creates a lost report at an active location.
-3. Finder creates a matching found report, uploads a photo and sets a private question and answer.
-4. Reload: both reports persist. Processing creates a match and in-app notification; strong matches request push delivery to registered devices.
-5. Owner confirms the match, answers the private question (5 attempts maximum), and opens secure chat.
-6. Staff assigns storage before claim if necessary, then confirms physical handover after verification.
-7. Both reports and the match show `RETURNED`. Conversations remain readable and become read-only.
-
-Never put a verification answer in a public item name or photo. Use a meaningful private fact. Automated matching is a suggestion, not proof of ownership.
-
-## More
-
-[Original specification](docs/SPECIFICATION.md) · [API](docs/API.md) · [Deployment](docs/DEPLOYMENT.md) · [Coverage / limitations](docs/STATUS.md) · [Tests](docs/TESTING.md)
+[Локальный стенд без облачных ключей](docs/LOCAL.md) · [API](docs/API.md) · [Развёртывание](docs/DEPLOYMENT.md) · [Ограничения](docs/STATUS.md)
