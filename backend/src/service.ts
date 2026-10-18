@@ -7,7 +7,7 @@ import sharp, { type Metadata } from "sharp";
 import pino from "pino";
 import { loadConfig } from "./config";
 import { imageSignature } from "./imageEvidence";
-import { score } from "./matching";
+import { score, qualifies } from "./matching";
 export const log = pino({
   redact: ["req.headers.authorization", "password", "answer", "token"],
 });
@@ -121,13 +121,13 @@ export class Service {
       if (m.status !== "PROPOSED") continue;
       if (m.source === "MANUAL") continue;
       const fresh = score(m.lost, m.found);
-      if (!fresh) {
+      if (!qualifies(fresh)) {
         result(await this.db.rpc("invalidate_match", { mid: m.id }));
       } else
         result(
           await this.db
             .from("matches")
-            .update(fresh)
+            .update(fresh!)
             .eq("id", m.id)
             .eq("status", "PROPOSED"),
         );
@@ -306,7 +306,7 @@ export class Service {
     );
     for (const c of candidates) {
       const s = score(r, c);
-      if (!s) continue;
+      if (!s || !qualifies(s)) continue;
       const lost = r.type === "LOST" ? r : c,
         found = r.type === "FOUND" ? r : c;
       result(

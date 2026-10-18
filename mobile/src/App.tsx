@@ -452,8 +452,8 @@ function MatchingDiagnostics({ id }: { id: string }) {
             Search job: {d.data.job?.state || "not queued"}
           </Text>
           <Text style={s.muted}>
-            MVP matching uses shared words in names or descriptions. Gemini,
-            distance and category do not block suggestions.
+            Matching compares name, color and description. Only similarity above
+            75% creates an automatic suggestion.
           </Text>
           {(d.data.ai_error || d.data.job?.last_error) && (
             <Text style={s.notice}>
@@ -640,7 +640,7 @@ function MobileReportTools({ report: r }: { report: Report }) {
               await api(`/reports/${r.id}/recheck`, { method: "POST" });
               Alert.alert(
                 "Search queued",
-                "Check Matches shortly. Any shared word in the names or descriptions creates an unverified suggestion from another account.",
+                "Check Matches shortly. Automatic suggestions require more than 75% similarity in name, color and description.",
               );
               refresh();
             } catch (e) {
@@ -742,7 +742,7 @@ function Matches() {
                 >
                   {m.source === "MANUAL"
                     ? "User requested claim"
-                    : `${Math.round(m.total_score)}% similarity`}{" "}
+                    : `${Number(m.total_score.toFixed(2))}% similarity`}{" "}
                   ·{" "}
                   {m.status === "PROPOSED" ? "Unverified suggestion" : m.status}
                 </Text>
@@ -1469,7 +1469,7 @@ function MatchScreen({ id, close }: { id: string; close: () => void }) {
               <Text style={s.h1}>
                 {v.source === "MANUAL"
                   ? "Ownership claim"
-                  : `${Math.round(v.total_score)}% match`}
+                  : `${Number(v.total_score.toFixed(2))}% match`}
               </Text>
               <Text style={s.muted}>A suggestion, not proof of ownership.</Text>
               <Text style={s.small}>
@@ -1479,21 +1479,30 @@ function MatchScreen({ id, close }: { id: string; close: () => void }) {
               <Item r={(v.viewer_is_owner ? v.found : v.lost)!} />
               <View style={[s.card, { padding: 20 }]}>
                 {[
-                  ["Visual / text", v.visual_score, 40],
-                  ["Location", v.location_score, 30],
-                  ["Time", v.time_score, 20],
-                  ["Unique features", v.feature_score, 10],
+                  ...(v.score_version === 2
+                    ? [
+                        ["Name", v.visual_score, null],
+                        ["Description", v.location_score, null],
+                        ["Color", v.time_score, null],
+                      ]
+                    : [
+                        ["Visual / text", v.visual_score, 40],
+                        ["Location", v.location_score, 30],
+                        ["Time", v.time_score, 20],
+                        ["Unique features", v.feature_score, 10],
+                      ]),
                 ].map(([label, n, max]) => (
                   <View
                     style={[
                       s.row,
                       { justifyContent: "space-between", marginVertical: 8 },
                     ]}
-                    key={label}
+                    key={String(label)}
                   >
                     <Text>{label}</Text>
                     <Text style={{ fontWeight: "700" }}>
-                      {n} / {max}
+                      {n}
+                      {max ? ` / ${max}` : " points"}
                     </Text>
                   </View>
                 ))}

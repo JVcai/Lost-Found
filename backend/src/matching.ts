@@ -43,69 +43,77 @@ export function distance(a: MatchItem, b: MatchItem): number {
       Math.sin(dlon / 2) ** 2;
   return 6371000 * 2 * Math.asin(Math.sqrt(Math.min(1, h)));
 }
-// MVP: one shared word in user-written names/descriptions is enough for a
-// suggestion. Generic reporting words alone are not evidence of an object.
+export const MATCH_THRESHOLD = 75;
 const filler = new Set(
   "a an the my i and with lost found item thing near at in on of is it this was have has please потерял потерян потеряна найден найдена нашел нашёл мой моя это вещь предмет в на и у с из для".split(
     " ",
   ),
 );
-export function textOverlap(a: MatchItem, b: MatchItem): number {
-  const meaningful = (r: MatchItem) =>
-    [...words(`${r.item_name} ${r.description}`)].filter((w) => !filler.has(w));
-  const x = new Set(meaningful(a)),
-    y = new Set(meaningful(b));
-  if (!x.size || !y.size) return 0;
-  return [...x].filter((w) => y.has(w)).length / new Set([...x, ...y]).size;
-}
+const colors: Record<string, string> = {
+  gray: "grey",
+  серый: "grey",
+  серая: "grey",
+  white: "white",
+  белый: "white",
+  белая: "white",
+  yellow: "yellow",
+  желтый: "yellow",
+  жёлтый: "yellow",
+  желтая: "yellow",
+  жёлтая: "yellow",
+  black: "black",
+  черный: "black",
+  чёрный: "black",
+  blue: "blue",
+  синий: "blue",
+  red: "red",
+  красный: "red",
+  green: "green",
+  зеленый: "green",
+  зелёный: "green",
+};
+const text = (value: string) =>
+  [...words(value)].filter((w) => !filler.has(w) && !colors[w]).join(" ");
+const color = (value: string) =>
+  [...words(value)].map((w) => colors[w] || w).join(" ");
 export function score(a: MatchItem, b: MatchItem) {
-  if (a.type === b.type || !textOverlap(a, b)) return null;
-  const equal = (x: string, y: string) =>
-    x.trim() && y.trim() && x.trim().toLowerCase() === y.trim().toLowerCase()
-      ? 1
-      : 0;
-  const hours =
-    Math.abs(Date.parse(a.event_at) - Date.parse(b.event_at)) / 3600000;
-  const meters = distance(a, b);
-  const samePlace = Boolean(a.location_id && a.location_id === b.location_id);
-  // Restore the original 40/30/20/10 ranking. The score orders suggestions;
-  // it is not an admission threshold and is not a probability of ownership.
-  const parts = {
-    visual_score:
-      40 *
-      (0.3 +
-        0.25 * equal(a.color, b.color) +
-        0.2 * equal(a.brand, b.brand) +
-        0.25 *
-          similarity(
-            `${a.item_name} ${a.description}`,
-            `${b.item_name} ${b.description}`,
-          )),
-    location_score:
-      30 *
-      (samePlace
-        ? 1
-        : Number.isFinite(meters)
-          ? Math.max(0, 1 - meters / 500)
-          : 0),
-    time_score: Number.isFinite(hours) ? 20 * Math.exp(-hours / 48) : 0,
-    feature_score:
-      10 * similarity(a.unique_features.join(" "), b.unique_features.join(" ")),
-  };
+  if (a.type === b.type) return null;
+  const name = similarity(text(a.item_name), text(b.item_name));
+  const description = similarity(text(a.description), text(b.description));
+  if (!name && !description) return null;
+  const hasDescription = Boolean(text(a.description) || text(b.description));
+  // Empty descriptions are unknown, not identical evidence. If both are empty,
+  // distribute the available weight between the name and the color.
+  const scale = hasDescription ? 1 : 100 / 70;
   const round = (n: number) => Math.round(n * 100) / 100;
-  const rounded = Object.fromEntries(
-    Object.entries(parts).map(([k, v]) => [k, round(v)]),
-  ) as typeof parts;
-  return {
-    ...rounded,
-    total_score: round(Object.values(rounded).reduce((x, y) => x + y, 0)),
+  const parts = {
+    visual_score: round(50 * name * scale),
+    location_score: round(hasDescription ? 30 * description : 0),
+    time_score: round(20 * similarity(color(a.color), color(b.color)) * scale),
+    feature_score: 0,
   };
+  return {
+    ...parts,
+    total_score: Math.min(
+      100,
+      round(Object.values(parts).reduce((x, y) => x + y, 0)),
+    ),
+    score_version: 2,
+  };
+}
+export function qualifies(s: ReturnType<typeof score>) {
+  return Boolean(s && s.total_score > MATCH_THRESHOLD);
 }
 export function matchReasons(a: MatchItem, b: MatchItem): string[] {
   if (a.type === b.type) return ["Reports must be LOST and FOUND."];
-  if (!textOverlap(a, b))
+  const s = score(a, b);
+  if (!s)
     return [
-      "No shared words in the names or descriptions. The lost item remains Searching.",
+      "Names and descriptions do not match. Shared color alone is not enough; the lost item remains Searching.",
+    ];
+  if (!qualifies(s))
+    return [
+      `Name, color and description similarity is ${s.total_score}%. A suggestion requires strictly more than 75%.`,
     ];
   return [];
 }

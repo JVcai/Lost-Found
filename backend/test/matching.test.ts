@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { score, distance, similarity, MatchItem } from "../src/matching";
+import { score, qualifies, similarity, MatchItem } from "../src/matching";
 import { reportSchema, registerSchema } from "@lostnet/shared";
 const lost: MatchItem = {
   type: "LOST",
@@ -16,64 +16,84 @@ const lost: MatchItem = {
   event_at: "2026-01-01T10:00:00Z",
 };
 const found = { ...lost, type: "FOUND", event_at: "2026-01-01T10:25:00Z" };
-test("original score weights still rank identical text strongly", () => {
+test("name, description and color each contribute to the score", () => {
   const s = score(lost, found)!;
-  assert.ok(s.total_score >= 99);
-  assert.equal(s.visual_score, 40);
+  assert.equal(s.total_score, 100);
+  assert.equal(s.visual_score, 50);
   assert.equal(s.location_score, 30);
-  assert.equal(s.feature_score, 10);
+  assert.equal(s.time_score, 20);
+  assert.ok(qualifies(s));
+  assert.equal(score(lost, { ...found, color: "White" })?.total_score, 80);
+  assert.ok(!qualifies(score(lost, { ...found, item_name: "Tishka" })));
 });
-test("any shared word in name or description is enough, regardless of category or distance", () => {
+test("75 exactly is excluded, strictly above 75 is admitted", () => {
+  const a = {
+    ...lost,
+    item_name: "stone ring",
+    description: "faceted gemstone",
+    color: "yellow",
+  };
   const b = {
     ...found,
-    item_name: "backpack",
-    description: "",
-    category: "Other",
-    location_id: null,
-    latitude: 52,
-    event_at: "2026-04-01T00:00:00Z",
-    brand: "",
-    color: "",
-    unique_features: [],
+    item_name: "stone",
+    description: a.description,
+    color: "yellow",
   };
-  const s = score(lost, b);
-  assert.ok(s);
-  assert.ok(s.total_score < 70, "Low rank does not exclude an MVP suggestion");
-  assert.ok(
-    score(
-      { ...lost, item_name: "Tishka", description: "striped cat" },
-      { ...b, item_name: "Kitten", description: "striped fur" },
-    ),
-  );
+  assert.equal(score(a, b)?.total_score, 75);
+  assert.equal(qualifies(score(a, b)), false);
+  assert.ok(qualifies(score(a, { ...b, item_name: a.item_name })));
 });
-test("a single shared color word in user text counts for the permissive MVP", () => {
-  assert.ok(
-    score(
-      { ...lost, item_name: "yellow bag", description: "" },
-      { ...found, item_name: "yellow diamond", description: "" },
-    ),
-  );
-});
-test("completely different names and descriptions remain Searching despite shared metadata or photos", () => {
+test("Tishka cannot match a diamond through shared color or generic description", () => {
   const a = {
     ...lost,
     item_name: "Tishka",
-    description: "cat",
-    brand: "",
+    description: "small yellow cat",
     color: "yellow",
-    ai_analysis: { image_sha256: "same-photo", object_type: "object" },
+    category: "Other",
+  };
+  const b = {
+    ...found,
+    item_name: "Yellow diamond",
+    description: "small yellow stone",
+    color: "yellow",
+    category: "Other",
+  };
+  assert.equal(qualifies(score(a, b)), false);
+  assert.equal(
+    qualifies(score({ ...a, description: "" }, { ...b, description: "" })),
+    false,
+  );
+  assert.equal(
+    qualifies(
+      score(
+        { ...a, item_name: "yellow bag", description: "" },
+        { ...b, description: "" },
+      ),
+    ),
+    false,
+  );
+});
+test("same names and colors work without descriptions, independently of GPS and date", () => {
+  const a = {
+    ...lost,
+    item_name: "Yellow diamond",
+    description: "",
+    color: "Yellow",
   };
   const b = {
     ...found,
     item_name: "yellow diamond",
-    description: "gemstone",
-    brand: "",
+    description: "",
     color: "yellow",
-    ai_analysis: a.ai_analysis,
+    latitude: 52,
+    location_id: null,
+    event_at: "2026-04-01T00:00:00Z",
   };
-  assert.equal(score(a, b), null);
+  assert.equal(score(a, b)?.total_score, 100);
+  assert.ok(qualifies(score(a, b)));
+  assert.equal(score(a, a), null);
 });
-test("generic reporting words alone do not connect unrelated objects", () => {
+test("generic reporting words and empty fields never add similarity", () => {
   assert.equal(
     score(
       { ...lost, item_name: "Lost cat", description: "my item" },
@@ -81,19 +101,14 @@ test("generic reporting words alone do not connect unrelated objects", () => {
     ),
     null,
   );
-});
-test("same types never match and unknown coordinates do not block shared text", () => {
-  assert.equal(score(lost, lost), null);
-  assert.ok(
-    score(
-      { ...lost, location_id: null, latitude: undefined, longitude: undefined },
-      {
-        ...found,
-        location_id: null,
-        latitude: undefined,
-        longitude: undefined,
-      },
+  assert.equal(
+    qualifies(
+      score(
+        { ...lost, item_name: "", description: "", color: "" },
+        { ...found, item_name: "", description: "", color: "" },
+      ),
     ),
+    false,
   );
 });
 test("Unicode text remains case insensitive", () =>

@@ -90,6 +90,12 @@ sql(
   ),
 );
 sql(
+  readFileSync(
+    root + "database/migrations/006_name_color_description_matching.sql",
+    "utf8",
+  ),
+);
+sql(
   "grant usage on schema storage to service_role;grant all on all tables in schema storage to service_role;NOTIFY pgrst, 'reload schema';",
 );
 console.log(

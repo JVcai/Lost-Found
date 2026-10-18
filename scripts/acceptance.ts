@@ -627,7 +627,7 @@ async function main() {
       {
         ...stoneInput,
         type: "FOUND",
-        item_name: "yellow stone",
+        item_name: "yellow diamond",
         category: "Other",
         latitude: location.latitude + 0.044,
         event_at: new Date().toISOString(),
@@ -682,8 +682,8 @@ async function main() {
     );
     assert.equal(stoneMatch.source, "AUTOMATIC");
     assert.ok(
-      stoneMatch.total_score > 0 && stoneMatch.total_score < 70,
-      "Low score must not discard shared text",
+      stoneMatch.total_score > 75,
+      "Name and color agreement must qualify even beyond 500m",
     );
     const stoneDetails = await call(
       `/reports/${stoneLost.id}/diagnostics`,
