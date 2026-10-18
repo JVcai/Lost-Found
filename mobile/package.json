@@ -6,7 +6,8 @@
   "scripts": {
     "start": "expo start",
     "typecheck": "tsc --noEmit",
-    "export:native": "expo export --platform android --platform ios"
+    "export:native": "expo export --platform android --platform ios",
+    "start:fast": "expo start --tunnel --no-dev --minify"
   },
   "dependencies": {
     "expo": "~54.0.0",
