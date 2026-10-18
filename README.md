@@ -24,7 +24,7 @@ copy mobile\.env.example mobile\.env
 
 Существующие `.env` не перезаписывайте. Заполните `backend/.env` URL, anon key, server-only service-role key и Gemini key. В `mobile/.env` нужны только публичный URL Supabase, anon key и адрес API. Секреты Gemini/service-role не должны иметь префикс `EXPO_PUBLIC_` и не должны попадать в мобильный код или Git.
 
-В новом Supabase один раз выполните `database/migrations/001_initial.sql`, затем `database/seed.sql`. Если вы уже выполняли миграцию, повторять её после этого обновления не нужно. Включите Email Auth. Подтверждение почты требует SMTP; для изолированного теста его можно временно отключить. Полноценный native-сценарий восстановления пароля по deep link пока не реализован — см. STATUS.md.
+В новом Supabase выполните `database/migrations/001_initial.sql`, затем `database/migrations/002_gps_and_match_reconciliation.sql` и `database/seed.sql`. В существующем проекте выполните только новую миграцию `002_gps_and_match_reconciliation.sql`, не повторяйте 001 и не удаляйте данные. Включите Email Auth. Подтверждение почты требует SMTP; для изолированного теста его можно временно отключить. Полноценный native-сценарий восстановления пароля по deep link пока не реализован — см. STATUS.md.
 
 Терминал 1:
 

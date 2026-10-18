@@ -7,6 +7,7 @@ export const categories = [
   "Documents",
   "Clothing",
   "Jewelry",
+  "Pets",
   "Other",
 ] as const;
 export const reportSchema = z
@@ -21,7 +22,8 @@ export const reportSchema = z
       .array(z.string().trim().min(1).max(200))
       .max(20)
       .default([]),
-    location_id: z.uuid(),
+    location_id: z.uuid().nullable().default(null),
+    location_label: z.string().trim().max(200).default(""),
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
     event_at: z.iso
@@ -36,12 +38,18 @@ export const reportSchema = z
   .refine(
     (v) => (v.latitude === undefined) === (v.longitude === undefined),
     "Provide both coordinates",
+  )
+  .refine(
+    (v) =>
+      Boolean(v.location_id) ||
+      (v.latitude !== undefined && v.longitude !== undefined),
+    "Select a location or add GPS coordinates",
   );
 export type ReportInput = z.infer<typeof reportSchema>;
 export type Report = ReportInput & {
   id: string;
   user_id: string;
-  organization_id: string;
+  organization_id: string | null;
   status: string;
   created_at: string;
   location_name?: string;

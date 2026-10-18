@@ -28,8 +28,11 @@ export class Api {
     return { status: "ok", service: "Lost&Found API" };
   }
   @Get("ready") async ready() {
-    const r = await this.s.db.from("locations").select("id").limit(1);
-    if (r.error) fail("Database not ready", 503);
+    const r = await this.s.db
+      .from("reports")
+      .select("id,location_label")
+      .limit(1);
+    if (r.error) fail("Database not ready. Apply migrations 001 and 002", 503);
     return {
       database: "ok",
       ai: this.s.config.GEMINI_API_KEY ? "configured" : "unconfigured",
@@ -99,24 +102,26 @@ export class Api {
       verification_answer: z.string().trim().min(3).max(200),
     });
     const proof = v.type === "FOUND" ? challenge.parse(body) : null;
-    const location = result(
-      await this.s.db
-        .from("locations")
-        .select("*")
-        .eq("id", v.location_id)
-        .eq("active", true)
-        .maybeSingle(),
-    );
-    if (!location) fail("Select an active location");
+    const location = v.location_id
+      ? result(
+          await this.s.db
+            .from("locations")
+            .select("*")
+            .eq("id", v.location_id)
+            .eq("active", true)
+            .maybeSingle(),
+        )
+      : null;
+    if (v.location_id && !location) fail("Select an active location");
     const r = result(
       await this.s.db
         .from("reports")
         .insert({
           ...v,
           user_id: actor,
-          organization_id: location.organization_id,
-          latitude: v.latitude ?? location.latitude,
-          longitude: v.longitude ?? location.longitude,
+          organization_id: location?.organization_id ?? null,
+          latitude: v.latitude ?? location?.latitude,
+          longitude: v.longitude ?? location?.longitude,
         })
         .select()
         .single(),
@@ -149,6 +154,7 @@ export class Api {
   }
   @Get("reports/my") async my(@Headers("authorization") h: string) {
     const actor = await this.s.actor(h);
+    await this.s.reconcileMatches(actor);
     return Promise.all(
       result(
         await this.s.db
@@ -241,6 +247,7 @@ export class Api {
   }
   @Get("matches") async matches(@Headers("authorization") h: string) {
     const actor = await this.s.actor(h);
+    await this.s.reconcileMatches(actor);
     const reports = result(
       await this.s.db.from("reports").select("id").eq("user_id", actor),
     );
@@ -250,6 +257,7 @@ export class Api {
       await this.s.db
         .from("matches")
         .select("*")
+        .neq("status", "REJECTED")
         .or(`lost_report_id.in.(${ids}),found_report_id.in.(${ids})`)
         .order("total_score", { ascending: false })
         .limit(100),
@@ -280,6 +288,7 @@ export class Api {
     @Param("id") id: string,
   ) {
     const actor = await this.s.actor(h);
+    await this.s.reconcileMatches(actor);
     await this.s.match(uuid(id), actor);
     result(await this.s.db.rpc("confirm_match", { mid: id, actor }));
     return { ok: true };

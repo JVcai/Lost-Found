@@ -102,6 +102,40 @@ async function main() {
       location_id: location.id,
       event_at: new Date(Date.now() - 3600000).toISOString(),
     };
+    const gpsOnly = await call(
+      "/reports",
+      owner.token,
+      {
+        ...input,
+        type: "LOST",
+        location_id: null,
+        location_label: "Park area",
+        latitude: location.latitude,
+        longitude: location.longitude,
+      },
+      "POST",
+      201,
+    );
+    reports.push(gpsOnly.id);
+    assert.equal(gpsOnly.location_id, null);
+    assert.equal(gpsOnly.organization_id, null);
+    await call(`/reports/${gpsOnly.id}`, staff.token, undefined, "GET", 403);
+    await call(`/reports/${gpsOnly.id}/publish`, owner.token, {}, "POST", 201);
+    const farSamePlace = await call(
+      "/reports",
+      owner.token,
+      { ...input, type: "LOST", latitude: -30, longitude: -60 },
+      "POST",
+      201,
+    );
+    reports.push(farSamePlace.id);
+    await call(
+      `/reports/${farSamePlace.id}/publish`,
+      owner.token,
+      {},
+      "POST",
+      201,
+    );
     const lost = await call(
       "/reports",
       owner.token,
@@ -188,11 +222,80 @@ async function main() {
       "Different-account candidate must be eligible",
     );
     assert.ok(
+      candidates.data.some((r: any) => r.id === gpsOnly.id),
+      "GPS-only report must qualify by actual proximity",
+    );
+    assert.ok(
+      !candidates.data.some((r: any) => r.id === farSamePlace.id),
+      "A shared venue cannot override distant GPS",
+    );
+    assert.ok(
       !candidates.data.some((r: any) => r.id === sameOwnerLost.id),
       "Same-account lost/found reports must never be matched",
     );
+    const unrelated = await call(
+      "/reports",
+      owner.token,
+      {
+        ...input,
+        type: "LOST",
+        item_name: "Tishka",
+        category: "Other",
+        brand: "",
+        color: "Grey-white",
+        description: "",
+        unique_features: [],
+      },
+      "POST",
+      201,
+    );
+    reports.push(unrelated.id);
+    await call(
+      `/reports/${unrelated.id}/publish`,
+      owner.token,
+      {},
+      "POST",
+      201,
+    );
+    const stale = await db
+      .from("matches")
+      .insert({
+        lost_report_id: unrelated.id,
+        found_report_id: found.id,
+        visual_score: 21,
+        location_score: 30,
+        time_score: 20,
+        feature_score: 0,
+        total_score: 71,
+      })
+      .select()
+      .single();
+    if (stale.error) throw stale.error;
+    await db
+      .from("reports")
+      .update({ status: "MATCH_FOUND" })
+      .eq("id", unrelated.id);
     const persisted = await call("/reports/my", owner.token);
     assert.ok(persisted.some((r: any) => r.id === lost.id));
+    assert.equal(
+      persisted.find((r: any) => r.id === unrelated.id)?.type,
+      "LOST",
+    );
+    assert.equal(
+      persisted.find((r: any) => r.id === unrelated.id)?.status,
+      "ACTIVE",
+    );
+    assert.equal(
+      (
+        await db
+          .from("matches")
+          .select("status")
+          .eq("id", stale.data.id)
+          .single()
+      ).data?.status,
+      "REJECTED",
+    );
+
     await call(`/reports/${lost.id}`, outsider.token, undefined, "GET", 403);
     const publicReports = await call("/reports/search", outsider.token);
     const visible = publicReports.find((r: any) => r.id === found.id);
@@ -230,10 +333,17 @@ async function main() {
     let matches: any[] = [];
     for (let n = 0; n < 25; n++) {
       matches = await call("/matches", owner.token);
-      if (matches.some((m) => m.found_report_id === found.id)) break;
+      if (
+        matches.some(
+          (m) => m.found_report_id === found.id && m.lost_report_id === lost.id,
+        )
+      )
+        break;
       await sleep(1000);
     }
-    const m = matches.find((m) => m.found_report_id === found.id);
+    const m = matches.find(
+      (m) => m.found_report_id === found.id && m.lost_report_id === lost.id,
+    );
     assert.ok(m, "Worker must create a match");
     matchIds.push(m.id);
     assert.ok(m.total_score >= 90);

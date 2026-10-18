@@ -98,3 +98,66 @@ test("registration validates email, password and name", () => {
     false,
   );
 });
+test("unrelated objects in Other cannot match from place/time/features alone", () => {
+  const cat = {
+    ...lost,
+    category: "Other",
+    item_name: "Tishka",
+    brand: "",
+    color: "yellow",
+    description: "",
+    unique_features: ["small scratch"],
+  };
+  const diamond = {
+    ...found,
+    category: "Other",
+    item_name: "yellow diamond",
+    brand: "",
+    color: "yellow",
+    description: "",
+    unique_features: ["small scratch"],
+  };
+  assert.equal(score(cat, diamond), null);
+  assert.equal(
+    score({ ...cat, item_name: "yellow bag" }, diamond),
+    null,
+    "A shared color is not object identity",
+  );
+});
+test("a common venue never overrides far-apart GPS positions", () => {
+  assert.equal(score(lost, { ...found, latitude: 52 }), null);
+});
+test("GPS-only reports match nearby, never globally through null place IDs", () => {
+  assert.ok(
+    score({ ...lost, location_id: null }, { ...found, location_id: null })!
+      .total_score >= 90,
+  );
+  assert.equal(
+    score(
+      { ...lost, location_id: null, latitude: undefined, longitude: undefined },
+      {
+        ...found,
+        location_id: null,
+        latitude: undefined,
+        longitude: undefined,
+      },
+    ),
+    null,
+  );
+});
+test("a GPS report does not require a registered location, but needs complete coordinates", () => {
+  const gps = { ...lost, location_id: null, location_label: "Near the park" };
+  assert.equal(reportSchema.safeParse(gps).success, true);
+  assert.equal(
+    reportSchema.safeParse({
+      ...gps,
+      latitude: undefined,
+      longitude: undefined,
+    }).success,
+    false,
+  );
+  assert.equal(
+    reportSchema.safeParse({ ...gps, longitude: undefined }).success,
+    false,
+  );
+});

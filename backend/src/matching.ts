@@ -7,7 +7,8 @@ export interface MatchItem {
   item_name: string;
   unique_features: string[];
   ai_features?: string[];
-  location_id: string;
+  location_id: string | null;
+  ai_analysis?: { object_type?: string } | null;
   latitude?: number;
   longitude?: number;
   event_at: string;
@@ -44,7 +45,73 @@ export function score(a: MatchItem, b: MatchItem) {
     Math.abs(Date.parse(a.event_at) - Date.parse(b.event_at)) / 3600000;
   if (hours > 168 || !Number.isFinite(hours)) return null;
   const meters = distance(a, b);
-  if (a.location_id !== b.location_id && meters > 500) return null;
+  const samePlace = Boolean(
+    a.location_id && b.location_id && a.location_id === b.location_id,
+  );
+  if (Number.isFinite(meters) ? meters > 500 : !samePlace) return null;
+  // Location/time are context, never evidence that two different objects are the same.
+  const meaningful = (value: string) =>
+    [...words(value)]
+      .filter(
+        (w) =>
+          !new Set([
+            "a",
+            "an",
+            "the",
+            "my",
+            "i",
+            "and",
+            "with",
+            "lost",
+            "found",
+            "item",
+            "thing",
+            "near",
+            "at",
+            "in",
+            "on",
+            "black",
+            "white",
+            "yellow",
+            "blue",
+            "red",
+            "green",
+            "grey",
+            "gray",
+            "потерял",
+            "потерян",
+            "найден",
+            "нашел",
+            "мой",
+            "моя",
+            "в",
+            "на",
+            "и",
+            "у",
+          ]).has(w),
+      )
+      .join(" ");
+  const names = similarity(meaningful(a.item_name), meaningful(b.item_name));
+  const text = similarity(
+    meaningful(a.item_name + " " + a.description),
+    meaningful(b.item_name + " " + b.description),
+  );
+  const objectA = a.ai_analysis?.object_type || "",
+    objectB = b.ai_analysis?.object_type || "";
+  const visualObject = Boolean(
+    objectA && objectB && similarity(objectA, objectB) >= 0.5,
+  );
+  const brandColor =
+    !["Other", "Pets"].includes(a.category) &&
+    Boolean(
+      a.brand.trim() &&
+      a.color.trim() &&
+      a.brand.trim().toLowerCase() === b.brand.trim().toLowerCase() &&
+      a.color.trim().toLowerCase() === b.color.trim().toLowerCase(),
+    );
+  if (names < 0.2 && text < 0.2 && !visualObject && !brandColor) return null;
+  if (objectA && objectB && similarity(objectA, objectB) === 0 && names < 0.5)
+    return null;
   const equal = (x: string, y: string) =>
     x.trim() && y.trim() && x.toLowerCase() === y.toLowerCase() ? 1 : 0;
   const visual =
@@ -58,7 +125,12 @@ export function score(a: MatchItem, b: MatchItem) {
           [b.item_name, b.description, ...(b.ai_features || [])].join(" "),
         ));
   const location =
-    30 * (a.location_id === b.location_id ? 1 : Math.max(0, 1 - meters / 500));
+    30 *
+    (Number.isFinite(meters)
+      ? Math.max(0, 1 - meters / 500)
+      : samePlace
+        ? 1
+        : 0);
   const time = 20 * Math.exp(-hours / 48);
   const feature =
     10 * similarity(a.unique_features.join(" "), b.unique_features.join(" "));

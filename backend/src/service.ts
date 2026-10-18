@@ -47,11 +47,12 @@ export class Service {
     if (error || !data.user) fail("Session expired. Sign in again", 401);
     return data.user.id;
   }
-  async staff(actor: string, org?: string, admin = false) {
+  async staff(actor: string, org?: string | null, admin = false) {
     const p = result(
       await this.db.from("profiles").select("role").eq("id", actor).single(),
     );
     if (p.role === "PLATFORM_ADMIN") return true;
+    if (org === null) return false;
     let q = this.db.from("staff_members").select("*").eq("user_id", actor);
     if (org) q = q.eq("organization_id", org);
     if (admin) q = q.eq("role", "ORG_ADMIN");
@@ -99,14 +100,46 @@ export class Service {
       await this.audit(actor, "STAFF_READ_MATCH", id);
     return { ...m, lost: l, found: f };
   }
-  async safeReport(r: any, privateData = false) {
-    const location = result(
-      await this.db
-        .from("locations")
-        .select("name")
-        .eq("id", r.location_id)
-        .single(),
+  async reconcileMatches(actor: string) {
+    const own = result(
+      await this.db.from("reports").select("id").eq("user_id", actor),
     );
+    if (!own.length) return;
+    const ids = own.map((r) => r.id).join(",");
+    const pending = result(
+      await this.db
+        .from("matches")
+        .select("id")
+        .eq("status", "PROPOSED")
+        .or(`lost_report_id.in.(${ids}),found_report_id.in.(${ids})`)
+        .limit(100),
+    );
+    for (const row of pending) {
+      const m = await this.match(row.id, actor);
+      if (m.status !== "PROPOSED") continue;
+      const fresh = score(m.lost, m.found);
+      if (!fresh || fresh.total_score < 70) {
+        result(await this.db.rpc("invalidate_match", { mid: m.id }));
+      } else
+        result(
+          await this.db
+            .from("matches")
+            .update(fresh)
+            .eq("id", m.id)
+            .eq("status", "PROPOSED"),
+        );
+    }
+  }
+  async safeReport(r: any, privateData = false) {
+    const location = r.location_id
+      ? result(
+          await this.db
+            .from("locations")
+            .select("name")
+            .eq("id", r.location_id)
+            .single(),
+        )
+      : null;
     const image = result(
       await this.db
         .from("report_images")
@@ -129,7 +162,7 @@ export class Service {
       item_name: r.item_name,
       brand: r.brand,
       color: r.color,
-      location_name: location.name,
+      location_name: location?.name || r.location_label || "GPS area",
       location_id: r.location_id,
       status: r.status,
       event_at: r.event_at,

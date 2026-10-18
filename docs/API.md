@@ -13,10 +13,11 @@ JSON REST API, default port 3000. All routes except `/health`, `/ready`, and `/a
 ## Reports / images
 
 - `GET /locations` — active locations.
-- `POST /reports` → draft. Required: `type: LOST|FOUND`, `category` (shared categories), `item_name`, `color`, `location_id` UUID, `event_at` ISO with timezone. Optional `brand`, `description`, `unique_features: string[]`, paired `latitude`/`longitude`, `reward`, `storage_location`. FOUND also requires `verification_question` and `verification_answer`; the answer is salted and hashed server-side.
+- `POST /reports` → draft. Required: `type: LOST|FOUND`, `category` (shared categories), `item_name`, `color`, a registered `location_id` UUID or complete GPS coordinates, `event_at` ISO with timezone. Optional `brand`, `description`, `unique_features: string[]`, paired `latitude`/`longitude`, `reward`, `storage_location`. FOUND also requires `verification_question` and `verification_answer`; the answer is salted and hashed server-side.
 - `POST /reports/:id/images` — multipart `image`; actual file format validated using sharp, 10 MB maximum, 40 megapixel decode limit, up to 5 images. Re-encodes to WebP, strips metadata, creates thumbnail. Draft authors only.
 - `POST /reports/:id/publish` — validates required photo/challenge, changes status and atomically queues processing.
 - `PATCH /reports/:id/ai-description` — author edits `{ai_description}` on an open report.
+- GPS-only reports use `location_id: null`, paired `latitude`/`longitude`, optional `location_label`; organization_id is null, so unrelated organization staff cannot access private fields.
 - `GET /reports/my` — private own reports, including drafts.
 - `GET /reports/search?q=&category=&color=&brand=&date=&status=` — limited public found-item projection. No user ID, exact coordinates, hidden features, descriptions, storage position or contact details. Signed images expire in 5 minutes.
 - `GET /reports/:id` — author or staff of that organization.
@@ -55,3 +56,7 @@ Candidates: opposite report types, different authors, same category, within 7 da
 - 10 points: Jaccard of private feature tokens.
 
 70+ creates a match and in-app notification; 90+ requests push. Gemini extracts descriptive visual features; this version does not compute image embeddings or learned visual similarity. The exact heuristics are replaceable in `backend/src/matching.ts`.
+
+## GPS/matching correction
+
+Apply migration 002 on existing Supabase projects. Public projections do not reveal exact coordinates. If both items have GPS, their distance must be ≤500m regardless of venue ID. With incomplete GPS, only a shared non-null registered location qualifies. Item-name/description or compatible AI object evidence is required before contextual score is considered. A common color or the Other category alone is insufficient. PROPOSED matches are reconciled against current rules when listing own reports/matches and before confirmation; rejected suggestions are removed from the active list and orphan MATCH_FOUND statuses return to ACTIVE. Confirmed workflows remain unchanged.

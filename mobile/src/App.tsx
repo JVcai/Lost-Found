@@ -29,6 +29,7 @@ import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { categories, Report, Match } from "@lostnet/shared";
 import { api, supabase, configured, useSession } from "./lib";
+import { groupMatches, counterpart } from "./reportPresentation";
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchInterval: 15000 } },
 });
@@ -257,9 +258,23 @@ function Item({ r, open }: { r: Report; open?: () => void }) {
       <View style={{ padding: 17 }}>
         <View style={s.row}>
           <Text style={s.eyebrow}>
-            {r.type} · {r.category}
+            {r.type === "LOST" ? "Lost report" : "Found report"} · {r.category}
           </Text>
-          <Text style={s.badge}>{r.status}</Text>
+          <Text style={s.badge}>
+            {(
+              {
+                MATCH_FOUND: "Possible match — unverified",
+                ACTIVE: "Searching",
+                FOUND: "Awaiting owner",
+                VERIFYING: "Verifying owner",
+                CLAIMED: "Owner verified",
+                RETURNED: "Returned",
+                STORED: "In storage",
+                DRAFT: "Draft",
+                CLOSED: "Closed",
+              } as Record<string, string>
+            )[r.status] || r.status}
+          </Text>
         </View>
         <Text style={s.h3}>{r.item_name}</Text>
         <Text style={s.muted}>⌖ {r.location_name}</Text>
@@ -514,12 +529,31 @@ function Matches() {
       {data.isLoading ? (
         <ActivityIndicator />
       ) : data.data?.length ? (
-        data.data.map((m) => (
-          <View key={m.id}>
-            <Text style={[s.badge, { alignSelf: "flex-start", marginTop: 20 }]}>
-              {Math.round(m.total_score)}% MATCH · {m.status}
+        Object.entries(groupMatches(data.data)).map(([own, items]) => (
+          <View key={own}>
+            <Text style={s.h2}>
+              Your {items[0].viewer_is_owner ? "lost" : "found"} report:{" "}
+              {
+                (items[0].viewer_is_owner ? items[0].lost : items[0].found)
+                  ?.item_name
+              }
             </Text>
-            <Item r={m.found!} open={() => setId(m.id)} />
+            <Text style={s.muted}>
+              {items.length} possible counterpart{items.length === 1 ? "" : "s"}{" "}
+              · these are suggestions, not confirmed returns
+            </Text>
+            {items.map((m) => (
+              <View key={m.id}>
+                <Text
+                  style={[s.badge, { alignSelf: "flex-start", marginTop: 20 }]}
+                >
+                  {Math.round(m.total_score)}% similarity ·{" "}
+                  {m.status === "PROPOSED" ? "Unverified suggestion" : m.status}
+                </Text>
+                <Text style={s.small}>Compared with your report above</Text>
+                <Item r={counterpart(m)!} open={() => setId(m.id)} />
+              </View>
+            ))}
           </View>
         ))
       ) : (
@@ -817,6 +851,8 @@ function ReportForm({
     [description, setDescription] = useState(""),
     [features, setFeatures] = useState(""),
     [location, setLocation] = useState(""),
+    [locationLabel, setLocationLabel] = useState(""),
+    [gpsBusy, setGpsBusy] = useState(false),
     [date, setDate] = useState(new Date().toISOString().slice(0, 16) + "Z"),
     [question, setQuestion] = useState(""),
     [answer, setAnswer] = useState(""),
@@ -943,7 +979,12 @@ function ReportForm({
                   <Pressable
                     key={l.id}
                     style={[s.location, location === l.id && s.chipActive]}
-                    onPress={() => setLocation(l.id)}
+                    disabled={gpsBusy}
+                    onPress={() => {
+                      setLocation(l.id);
+                      setGps(undefined);
+                      setLocationLabel("");
+                    }}
                   >
                     <Text>
                       {location === l.id ? "●" : "○"} {l.name}
@@ -953,34 +994,104 @@ function ReportForm({
                 <ErrorText error={locations.error?.message} />
                 {locations.data?.length === 0 && (
                   <Text style={s.error}>
-                    No active locations. Ask an administrator to add one.
+                    No registered locations. Use GPS to report your actual area.
                   </Text>
                 )}
                 <Button
                   secondary
+                  disabled={gpsBusy}
                   title={
-                    gps
-                      ? "✓ GPS coordinates added"
-                      : "Add current GPS (optional)"
+                    gpsBusy
+                      ? "Getting current position…"
+                      : gps
+                        ? "✓ Using GPS — no venue selection needed"
+                        : "Use my current GPS location"
                   }
                   onPress={async () => {
+                    setGpsBusy(true);
+                    setError("");
                     try {
                       const p =
                         await Location.requestForegroundPermissionsAsync();
                       if (p.status !== "granted")
-                        throw new Error("Location permission denied");
-                      const r = await Location.getCurrentPositionAsync({
-                        accuracy: Location.Accuracy.Balanced,
-                      });
+                        throw new Error(
+                          "Location permission denied. Choose a registered place or enable permission in settings.",
+                        );
+                      if (!(await Location.hasServicesEnabledAsync()))
+                        throw new Error(
+                          "Enable location services on your phone.",
+                        );
+                      const r = await Promise.race([
+                        Location.getCurrentPositionAsync({
+                          accuracy: Location.Accuracy.High,
+                        }),
+                        new Promise<never>((_, reject) =>
+                          setTimeout(
+                            () =>
+                              reject(
+                                new Error(
+                                  "GPS timed out. Move outdoors and try again.",
+                                ),
+                              ),
+                            20000,
+                          ),
+                        ),
+                      ]);
                       setGps({
                         latitude: r.coords.latitude,
                         longitude: r.coords.longitude,
                       });
+                      setLocation("");
+                      setLocationLabel("GPS area");
+                      try {
+                        const addresses = await Promise.race([
+                          Location.reverseGeocodeAsync({
+                            latitude: r.coords.latitude,
+                            longitude: r.coords.longitude,
+                          }),
+                          new Promise<Location.LocationGeocodedAddress[]>(
+                            (resolve) => setTimeout(() => resolve([]), 4000),
+                          ),
+                        ]);
+                        const first = addresses[0];
+                        if (first)
+                          setLocationLabel(
+                            [first.city, first.district]
+                              .filter(Boolean)
+                              .join(", ") || "GPS area",
+                          );
+                      } catch {
+                        /* Coordinates remain usable without reverse geocoding. */
+                      }
                     } catch (e) {
                       setError((e as Error).message);
+                    } finally {
+                      setGpsBusy(false);
                     }
                   }}
                 />
+                {gps && (
+                  <View style={s.verification}>
+                    <Text style={s.muted}>
+                      Selected GPS: {gps.latitude.toFixed(5)},{" "}
+                      {gps.longitude.toFixed(5)}. These coordinates are not
+                      shown publicly.
+                    </Text>
+                    <Field
+                      label="Area / landmark (public, no exact address)"
+                      value={locationLabel}
+                      set={setLocationLabel}
+                    />
+                    <Button
+                      secondary
+                      title="Remove GPS"
+                      onPress={() => {
+                        setGps(undefined);
+                        setLocationLabel("");
+                      }}
+                    />
+                  </View>
+                )}
                 <Field
                   label="Date and time * (ISO, e.g. 2026-10-18T10:30:00+05:45)"
                   value={date}
@@ -1042,7 +1153,7 @@ function ReportForm({
                       ? "Continue publishing"
                       : "Submit report →"
                 }
-                disabled={busy}
+                disabled={busy || gpsBusy}
                 onPress={async () => {
                   setBusy(true);
                   setError("");
@@ -1066,7 +1177,8 @@ function ReportForm({
                             .split(",")
                             .map((v) => v.trim())
                             .filter(Boolean),
-                          location_id: location,
+                          location_id: location || null,
+                          location_label: locationLabel,
                           event_at: new Date(date).toISOString(),
                           ...gps,
                           ...(type === "FOUND"
@@ -1160,7 +1272,11 @@ function MatchScreen({ id, close }: { id: string; close: () => void }) {
             <>
               <Text style={s.h1}>{Math.round(v.total_score)}% match</Text>
               <Text style={s.muted}>A suggestion, not proof of ownership.</Text>
-              <Item r={v.found!} />
+              <Text style={s.small}>
+                Your {v.viewer_is_owner ? "lost" : "found"} report:{" "}
+                {(v.viewer_is_owner ? v.lost : v.found)?.item_name}
+              </Text>
+              <Item r={(v.viewer_is_owner ? v.found : v.lost)!} />
               <View style={[s.card, { padding: 20 }]}>
                 {[
                   ["Visual / text", v.visual_score, 40],
