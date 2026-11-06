@@ -1,0 +1,28 @@
+{
+  "name": "lost-found",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "mobile",
+    "packages/shared"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:api": "npm run dev -w backend",
+    "dev:mobile": "npm run start -w mobile",
+    "build": "npm run build -w @lostnet/shared && npm run build -w backend",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w backend",
+    "postinstall": "npm run build -w @lostnet/shared",
+    "test:acceptance": "tsx scripts/acceptance.ts",
+    "local:up": "node scripts/local/up.mjs",
+    "local:gateway": "node scripts/local/gateway.mjs",
+    "local:down": "node scripts/local/down.mjs"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10"
+  }
+}
