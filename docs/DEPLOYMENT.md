@@ -2,6 +2,8 @@
 
 ## Supabase
 
+For the current version apply all pending migrations through **007_personal_analytics.sql**, in order. Migration 007 is required for the Profile analytics panel; do not rerun previously applied migrations.
+
 Apply the initial SQL migration and optional location seed once in a new project. Existing projects must apply 002_gps_and_match_reconciliation.sql for GPS-only reports and match reconciliation. Do not rerun 001 or reset the schema. Keep Storage buckets private and RLS enabled. Configure SMTP for email confirmation. Configure Auth redirects for the app's existing `lostnet` scheme only when native deep-link recovery is implemented/tested; see STATUS.md. No web site is included.
 
 ## API

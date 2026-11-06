@@ -1,5 +1,7 @@
 # Lost&Found — current scope
 
+Endterm update: personal analytics is implemented in Profile with PostgreSQL totals, return rate and a category bar chart (`GET /analytics`, migration 007). See [ENDTERM.md](ENDTERM.md) for the current audit and live demo without Gemini. Historical matching descriptions below are superseded by the final 006 policy; analytics is no longer remaining work.
+
 The app is mobile-only (Android/iOS). The previous React/Vite workspace, browser tests, web dependencies and web export/deployment commands have been removed. Backend and Supabase remain required. Display branding is Lost&Found; technical package/import identifiers remain compatible.
 
 Implemented: Supabase email/password auth, lost/found drafts and publishing, camera/gallery, GPS, private compressed images, report editing, search, matching with 40/30/20/10 weights, Gemini adapter and editable descriptions, in-app notifications and Expo push adapter, ownership challenge/attempt limit, private text/image/system chat. Profile → Staff desk now supports organization reports, storage assignment, conversation and confirmed physical handover. API authorization and database permissions remain authoritative.

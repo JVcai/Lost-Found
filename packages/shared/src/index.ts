@@ -14,9 +14,13 @@ export const reportSchema = z
   .object({
     type: z.enum(["LOST", "FOUND"]),
     category: z.enum(categories),
-    item_name: z.string().trim().min(2).max(120),
+    item_name: z
+      .string()
+      .trim()
+      .min(2, "Item name is required (at least 2 characters)")
+      .max(120),
     brand: z.string().trim().max(100).default(""),
-    color: z.string().trim().min(1).max(60),
+    color: z.string().trim().min(1, "Color is required").max(60),
     description: z.string().trim().max(2000).default(""),
     unique_features: z
       .array(z.string().trim().min(1).max(200))
@@ -46,6 +50,13 @@ export const reportSchema = z
     "Select a location or add GPS coordinates",
   );
 export type ReportInput = z.infer<typeof reportSchema>;
+export type PersonalAnalytics = {
+  total_reports: number;
+  returned_reports: number;
+  draft_reports: number;
+  return_rate: number;
+  by_category: { category: string; count: number }[];
+};
 export type Report = ReportInput & {
   id: string;
   user_id: string;

@@ -28,7 +28,7 @@ import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
-import { categories, Report, Match } from "@lostnet/shared";
+import { categories, Report, Match, PersonalAnalytics } from "@lostnet/shared";
 import { api, supabase, configured, useSession } from "./lib";
 import { groupMatches, counterpart } from "./reportPresentation";
 const qc = new QueryClient({
@@ -810,6 +810,74 @@ function Inbox() {
     </Page>
   );
 }
+function Analytics() {
+  const q = useQuery<PersonalAnalytics>({
+    queryKey: ["analytics"],
+    queryFn: () => api("/analytics"),
+  });
+  const data = q.data;
+  const max = Math.max(1, ...(data?.by_category.map((v) => v.count) || []));
+  return (
+    <View style={[s.card, { padding: 20 }]}>
+      <Text style={s.h2}>My report analytics</Text>
+      <Text style={s.muted}>
+        All your saved reports, including drafts and closed reports.
+      </Text>
+      {q.isLoading && <ActivityIndicator />}
+      <ErrorText error={q.error?.message} />
+      {data && (
+        <>
+          <Text style={s.h3}>Total reports: {data.total_reports}</Text>
+          <Text style={s.h3}>Returned reports: {data.returned_reports}</Text>
+          <Text style={s.h3}>Return rate: {data.return_rate}%</Text>
+          <Text style={s.muted}>
+            Returned / all saved reports × 100. Drafts: {data.draft_reports}.
+          </Text>
+          <Text style={s.h3}>Reports by category</Text>
+          {!data.total_reports && (
+            <Text style={s.muted}>Save a report to start the chart.</Text>
+          )}
+          {data.by_category.map((v) => (
+            <View
+              key={v.category}
+              accessible
+              accessibilityLabel={`${v.category}: ${v.count} reports`}
+              style={{ marginVertical: 6 }}
+            >
+              <Text style={s.label}>
+                {v.category}: {v.count}
+              </Text>
+              <View
+                style={{
+                  height: 16,
+                  backgroundColor: "#edf6e8",
+                  borderRadius: 4,
+                }}
+              >
+                <View
+                  style={{
+                    height: 16,
+                    width: `${(100 * v.count) / max}%`,
+                    backgroundColor: "#16a34a",
+                    borderRadius: 4,
+                  }}
+                />
+              </View>
+            </View>
+          ))}
+        </>
+      )}
+      <Button
+        secondary
+        title={q.isFetching ? "Refreshing…" : "Refresh analytics"}
+        disabled={q.isFetching}
+        onPress={() => {
+          void q.refetch();
+        }}
+      />
+    </View>
+  );
+}
 function Profile() {
   const q = useQuery<any>({ queryKey: ["me"], queryFn: () => api("/me") });
   const [notice, setNotice] = useState(""),
@@ -827,6 +895,7 @@ function Profile() {
             : q.data?.role || "USER"}
         </Text>
       </View>
+      <Analytics />
       <Text style={s.h2}>Stay connected</Text>
       <Text style={s.muted}>
         Enable push notifications for strong matches. Requires a physical device

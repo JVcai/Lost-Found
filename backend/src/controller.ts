@@ -29,12 +29,19 @@ export class Api {
     return { status: "ok", service: "Lost&Found API" };
   }
   @Get("ready") async ready() {
-    const r = await this.s.db.from("matches").select("id,source").limit(1);
+    const r = await this.s.db
+      .from("matches")
+      .select("id,source,score_version")
+      .limit(1);
     if (r.error)
       fail(
-        "Database not ready. Apply database migrations 001 through 004",
+        "Database not ready. Apply pending database migrations through 007",
         503,
       );
+    const analytics = await this.s.db.rpc("personal_analytics", {
+      actor: "00000000-0000-0000-0000-000000000000",
+    });
+    if (analytics.error) fail("Analytics not ready. Apply migration 007", 503);
     return {
       database: "ok",
       ai: this.s.config.GEMINI_API_KEY ? "configured" : "unconfigured",
@@ -86,6 +93,10 @@ export class Api {
         await this.s.db.from("staff_members").select("*").eq("user_id", actor),
       ),
     };
+  }
+  @Get("analytics") async analytics(@Headers("authorization") h: string) {
+    const actor = await this.s.actor(h);
+    return result(await this.s.db.rpc("personal_analytics", { actor }));
   }
   @Get("locations") async locations(@Headers("authorization") h: string) {
     await this.s.actor(h);
