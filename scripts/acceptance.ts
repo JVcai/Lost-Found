@@ -92,11 +92,14 @@ async function main() {
     });
     if (membership.error) throw membership.error;
     await call("/reports/my", undefined, undefined, "GET", 401);
+<<<<<<< HEAD
     await call("/analytics", undefined, undefined, "GET", 401);
     const emptyAnalytics = await call("/analytics", owner.token);
     assert.equal(emptyAnalytics.total_reports, 0);
     assert.equal(emptyAnalytics.return_rate, 0);
     assert.deepEqual(emptyAnalytics.by_category, []);
+=======
+>>>>>>> 7d54c83c5f1152581c0d993881273b258a8147db
     const input = {
       category: "Bags",
       item_name: "Black Nike backpack",
@@ -107,6 +110,7 @@ async function main() {
       location_id: location.id,
       event_at: new Date(Date.now() - 3600000).toISOString(),
     };
+<<<<<<< HEAD
     for (const invalid of [
       { item_name: "   " },
       { color: "   " },
@@ -121,6 +125,8 @@ async function main() {
       );
       assert.equal((await call("/analytics", owner.token)).total_reports, 0);
     }
+=======
+>>>>>>> 7d54c83c5f1152581c0d993881273b258a8147db
     const gpsOnly = await call(
       "/reports",
       owner.token,
@@ -136,11 +142,14 @@ async function main() {
       201,
     );
     reports.push(gpsOnly.id);
+<<<<<<< HEAD
     const analytics = await call("/analytics", owner.token);
     assert.equal(analytics.total_reports, 1);
     assert.equal(analytics.draft_reports, 1);
     assert.deepEqual(analytics.by_category, [{ category: "Bags", count: 1 }]);
     assert.equal((await call("/analytics", outsider.token)).total_reports, 0);
+=======
+>>>>>>> 7d54c83c5f1152581c0d993881273b258a8147db
     assert.equal(gpsOnly.location_id, null);
     assert.equal(gpsOnly.organization_id, null);
     await call(`/reports/${gpsOnly.id}`, staff.token, undefined, "GET", 403);
@@ -603,12 +612,15 @@ async function main() {
     assert.equal(returned.status, "RETURNED");
     assert.equal(returned.lost.status, "RETURNED");
     assert.equal(returned.found.status, "RETURNED");
+<<<<<<< HEAD
     const afterReturn = await call("/analytics", owner.token);
     assert.equal(afterReturn.returned_reports, 1);
     assert.equal(
       afterReturn.return_rate,
       Math.round(1000 / afterReturn.total_reports) / 10,
     );
+=======
+>>>>>>> 7d54c83c5f1152581c0d993881273b258a8147db
     const reopened = await call("/reports/my", locked.token);
     assert.equal(
       reopened.find((r: any) => r.id === lost2.id)?.status,

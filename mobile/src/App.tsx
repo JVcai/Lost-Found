@@ -28,7 +28,11 @@ import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
+<<<<<<< HEAD
 import { categories, Report, Match, PersonalAnalytics } from "@lostnet/shared";
+=======
+import { categories, Report, Match } from "@lostnet/shared";
+>>>>>>> 7d54c83c5f1152581c0d993881273b258a8147db
 import { api, supabase, configured, useSession } from "./lib";
 import { groupMatches, counterpart } from "./reportPresentation";
 const qc = new QueryClient({
@@ -810,6 +814,7 @@ function Inbox() {
     </Page>
   );
 }
+<<<<<<< HEAD
 function Analytics() {
   const q = useQuery<PersonalAnalytics>({
     queryKey: ["analytics"],
@@ -878,6 +883,8 @@ function Analytics() {
     </View>
   );
 }
+=======
+>>>>>>> 7d54c83c5f1152581c0d993881273b258a8147db
 function Profile() {
   const q = useQuery<any>({ queryKey: ["me"], queryFn: () => api("/me") });
   const [notice, setNotice] = useState(""),
@@ -895,7 +902,10 @@ function Profile() {
             : q.data?.role || "USER"}
         </Text>
       </View>
+<<<<<<< HEAD
       <Analytics />
+=======
+>>>>>>> 7d54c83c5f1152581c0d993881273b258a8147db
       <Text style={s.h2}>Stay connected</Text>
       <Text style={s.muted}>
         Enable push notifications for strong matches. Requires a physical device
